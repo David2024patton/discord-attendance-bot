@@ -29,7 +29,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ----------------------------
 ADMIN_ID = 740522966474948638
 DEFAULT_MAX_ATTENDING = 10
-NOSHOW_THRESHOLD = 3  # auto-standby after this many no-shows
+DEFAULT_NOSHOW_THRESHOLD = 3  # auto-standby after this many no-shows
+DEFAULT_CHECKIN_GRACE = 30  # minutes after session start before auto-relieve
 
 ALLOWED_GUILDS = [1370907857830746194, 1475253514111291594]
 SCHEDULE_CHANNEL_ID = 1370911001247223859
@@ -61,6 +62,7 @@ def admin_only():
 def load_state():
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
     global event_message_id, event_channel_id, session_name, session_dt_str
+    global NOSHOW_THRESHOLD, CHECKIN_GRACE_MINUTES
     global last_posted_session, MAX_ATTENDING, session_days, reminder_sent
     global checkin_active, checked_in_ids, checkin_message_id
 
@@ -87,6 +89,8 @@ def load_state():
                 checkin_active = data.get('checkin_active', False)
                 checked_in_ids = data.get('checked_in_ids', [])
                 checkin_message_id = data.get('checkin_message_id')
+                NOSHOW_THRESHOLD = data.get('noshow_threshold', DEFAULT_NOSHOW_THRESHOLD)
+                CHECKIN_GRACE_MINUTES = data.get('checkin_grace_minutes', DEFAULT_CHECKIN_GRACE)
                 print(f"✅ Loaded state from {STATE_FILE}")
                 return True
     except Exception as e:
@@ -112,6 +116,8 @@ def load_state():
     checkin_active = False
     checked_in_ids = []
     checkin_message_id = None
+    NOSHOW_THRESHOLD = DEFAULT_NOSHOW_THRESHOLD
+    CHECKIN_GRACE_MINUTES = DEFAULT_CHECKIN_GRACE
     return False
 
 def save_state():
@@ -131,6 +137,8 @@ def save_state():
         'checkin_active': checkin_active,
         'checked_in_ids': checked_in_ids,
         'checkin_message_id': checkin_message_id,
+        'noshow_threshold': NOSHOW_THRESHOLD,
+        'checkin_grace_minutes': CHECKIN_GRACE_MINUTES,
     }
     try:
         with open(STATE_FILE, 'w') as f:
@@ -664,7 +672,7 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
 
     embed = discord.Embed(title=title, color=0x2ecc71)
     embed.add_field(name=f"Attending (0/{MAX_ATTENDING})", value="None", inline=False)
-    embed.add_field(name=f"Standby (0/{MAX_STANDBY})", value="None", inline=False)
+    embed.add_field(name="Standby (0)", value="None", inline=False)
     embed.add_field(name="Not Attending", value="None", inline=False)
 
     schedule_view = ScheduleView()
@@ -821,6 +829,42 @@ async def resetstats(ctx, member: discord.Member):
         await ctx.send(f"✅ Reset stats for {member.mention}")
     else:
         await ctx.send(f"❌ No stats found for {member.mention}")
+
+@bot.command()
+@admin_only()
+async def setgrace(ctx, minutes: int):
+    """Set check-in grace period. Usage: !setgrace 30"""
+    global CHECKIN_GRACE_MINUTES
+    if minutes < 5 or minutes > 120:
+        await ctx.send("❌ Grace period must be between 5 and 120 minutes.")
+        return
+    CHECKIN_GRACE_MINUTES = minutes
+    save_state()
+    await ctx.send(f"✅ Check-in grace period set to **{minutes} minutes**")
+
+@bot.command()
+@admin_only()
+async def setnoshow(ctx, n: int):
+    """Set no-show threshold for auto-standby. Usage: !setnoshow 3"""
+    global NOSHOW_THRESHOLD
+    if n < 1 or n > 20:
+        await ctx.send("❌ Threshold must be between 1 and 20.")
+        return
+    NOSHOW_THRESHOLD = n
+    save_state()
+    await ctx.send(f"✅ No-show threshold set to **{n}** (auto-standby after {n} no-shows)")
+
+@bot.command()
+async def settings(ctx):
+    """Show current bot settings"""
+    days_list = ", ".join(sd['name'] for sd in sorted(session_days, key=lambda x: x['weekday'])) or "None"
+    embed = discord.Embed(title="⚙️ Bot Settings", color=0x95a5a6)
+    embed.add_field(name="Max Attending", value=str(MAX_ATTENDING), inline=True)
+    embed.add_field(name="Check-In Grace", value=f"{CHECKIN_GRACE_MINUTES} min", inline=True)
+    embed.add_field(name="No-Show Threshold", value=f"{NOSHOW_THRESHOLD} (auto-standby)", inline=True)
+    embed.add_field(name="Session Days", value=days_list, inline=False)
+    embed.add_field(name="Admin", value=f"<@{ADMIN_ID}>", inline=True)
+    await ctx.send(embed=embed)
 
 # ----------------------------
 # Stats / Leaderboard
@@ -1021,21 +1065,21 @@ async def checkin_manager():
             if channel:
                 checkin_view = CheckInView()
                 msg = await channel.send(
-                    "🟢 **Session is starting!** Attendees, please check in below.\n"
-                    "You have **15 minutes** to check in or you'll be marked as a no-show.",
+                    f"🟢 **Session is starting!** Attendees, please check in below.\n"
+                    f"You have **{CHECKIN_GRACE_MINUTES} minutes** to check in or you'll be **auto-relieved**.",
                     view=checkin_view
                 )
                 checkin_message_id = msg.id
                 save_state()
                 print("✅ Check-in posted")
 
-        # 15 min after: process no-shows
-        if 15 <= minutes_after <= 17 and checkin_active:
+        # After grace period: auto-relieve no-shows
+        if CHECKIN_GRACE_MINUTES <= minutes_after <= CHECKIN_GRACE_MINUTES + 2 and checkin_active:
             checkin_active = False
             no_show_users = []
             checked_in_users = []
 
-            for uid in attending_ids:
+            for uid in list(attending_ids):  # copy list since we modify it
                 if uid in checked_in_ids:
                     record_attendance(uid)
                     checked_in_users.append(uid)
@@ -1043,7 +1087,7 @@ async def checkin_manager():
                     record_no_show(uid)
                     no_show_users.append(uid)
 
-                    # Warn on 2nd no-show
+                    # Warn on penultimate no-show
                     stats = get_user_stats(uid)
                     if stats["no_shows"] == NOSHOW_THRESHOLD - 1:
                         try:
@@ -1055,25 +1099,52 @@ async def checkin_manager():
                         except:
                             pass
 
-            save_state()
-
-            # Post no-show results
-            if no_show_users:
-                channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
-                if channel:
-                    mentions = []
-                    for uid in no_show_users:
-                        try:
-                            user = await bot.fetch_user(uid)
-                            mentions.append(user.mention)
-                        except:
-                            mentions.append(f"<@{uid}>")
-                    await channel.send(
-                        f"❌ **No-shows ({len(no_show_users)}):** {', '.join(mentions)}\n"
-                        f"✅ **Checked in ({len(checked_in_users)}):** {len(checked_in_users)} players"
+            # AUTO-RELIEVE: remove no-shows from attending, offer spots to standby
+            for uid in no_show_users:
+                to_remove = [u for u in attending if u.id == uid]
+                for u in to_remove:
+                    attending.remove(u)
+                    if u not in not_attending:
+                        not_attending.append(u)
+                # DM the no-show
+                try:
+                    user = await bot.fetch_user(uid)
+                    await user.send(
+                        f"❌ You didn't check in within {CHECKIN_GRACE_MINUTES} minutes. "
+                        f"Your spot has been **auto-relieved** and offered to standby."
                     )
+                except:
+                    pass
 
-            print(f"📊 Check-in complete: {len(checked_in_users)} checked in, {len(no_show_users)} no-shows")
+            sync_ids_from_users()
+
+            # Offer freed spots to standby
+            for _ in range(len(no_show_users)):
+                await offer_next_standby()
+
+            # Update embed
+            if schedule_view:
+                await schedule_view.update_embed()
+
+            # Post results
+            channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
+            if channel:
+                no_show_mentions = []
+                for uid in no_show_users:
+                    no_show_mentions.append(f"<@{uid}>")
+                checked_mentions = []
+                for uid in checked_in_users:
+                    checked_mentions.append(f"<@{uid}>")
+
+                msg_parts = []
+                if no_show_users:
+                    msg_parts.append(f"❌ **Auto-relieved ({len(no_show_users)}):** {', '.join(no_show_mentions)}")
+                if checked_in_users:
+                    msg_parts.append(f"✅ **Checked in ({len(checked_in_users)}):** {', '.join(checked_mentions)}")
+                if msg_parts:
+                    await channel.send("\n".join(msg_parts))
+
+            print(f"📊 Check-in complete: {len(checked_in_users)} checked in, {len(no_show_users)} auto-relieved")
     except Exception as e:
         print(f"❌ Check-in manager error: {e}")
 
