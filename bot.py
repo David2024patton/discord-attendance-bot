@@ -22,7 +22,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # ----------------------------
 # Config
@@ -222,6 +222,7 @@ not_attending = []
 pending_offer = None
 event_message = None
 schedule_view = None
+countdown_task = None  # asyncio.Task for live countdown
 
 # ----------------------------
 # Helper: next run datetime
@@ -669,6 +670,28 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     global session_name, session_dt_str, event_message_id, event_channel_id
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
     global reminder_sent, checkin_active, checked_in_ids, checkin_message_id
+    global countdown_task
+
+    # Cancel any running countdown timer
+    if countdown_task and not countdown_task.done():
+        countdown_task.cancel()
+        countdown_task = None
+
+    # Delete the old session message so people can't interact with it
+    if event_message:
+        try:
+            await event_message.delete()
+        except Exception:
+            pass
+        event_message = None
+    elif event_message_id and event_channel_id:
+        # Fallback: fetch and delete by stored ID (e.g. after bot restart)
+        try:
+            old_ch = await bot.fetch_channel(event_channel_id)
+            old_msg = await old_ch.fetch_message(event_message_id)
+            await old_msg.delete()
+        except Exception:
+            pass
 
     # Clear runtime lists
     attending.clear()
@@ -714,22 +737,74 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     event_channel_id = channel.id
     save_state()
 
+    # Start live countdown timer if session has a future datetime
+    if session_dt:
+        countdown_task = asyncio.create_task(_run_countdown())
+
+# ----------------------------
+# Live Countdown Timer
+# ----------------------------
+async def _run_countdown():
+    """Edits the session embed every 10s with a live countdown until the session starts."""
+    global event_message, session_dt_str
+    try:
+        while True:
+            await asyncio.sleep(10)
+            if not event_message or not session_dt_str:
+                return
+            try:
+                session_dt = datetime.fromisoformat(session_dt_str)
+                now = datetime.now(session_dt.tzinfo or EST)
+                remaining = (session_dt - now).total_seconds()
+                if remaining <= 0:
+                    # Session started — update embed one final time
+                    if schedule_view:
+                        embed = build_embed()
+                        embed.set_footer(text="🟢 Session has started!")
+                        await event_message.edit(embed=embed, view=schedule_view)
+                    return
+                # Build human-readable countdown
+                mins, secs = divmod(int(remaining), 60)
+                hours, mins = divmod(mins, 60)
+                if hours > 0:
+                    countdown_str = f"{hours}h {mins}m {secs}s"
+                elif mins > 0:
+                    countdown_str = f"{mins}m {secs}s"
+                else:
+                    countdown_str = f"{secs}s"
+                # Edit the embed with updated countdown
+                if schedule_view:
+                    embed = build_embed()
+                    embed.set_footer(text=f"⏰ Starts in {countdown_str}")
+                    await event_message.edit(embed=embed, view=schedule_view)
+            except discord.NotFound:
+                return  # message was deleted
+            except discord.HTTPException:
+                await asyncio.sleep(5)  # back off on rate limit
+    except asyncio.CancelledError:
+        return
+
 # ----------------------------
 # Commands
 # ----------------------------
-@bot.command()
+@bot.command(help="Create a manual session sign-up in this channel.")
 async def schedule(ctx):
     await create_schedule(ctx.channel, "Manual Session", session_dt=datetime.now(EST))
 
-@bot.command()
-async def testsession(ctx):
-    test_dt = datetime.now(EST) + timedelta(minutes=1)
-    await create_schedule(ctx.channel, "Test Session - Immediate", session_dt=test_dt)
+@bot.command(help="Create a quick test session. Usage: !testsession [minutes] (default 1, admin only)")
+async def testsession(ctx, minutes: int = 1):
+    if not await check_admin(ctx):
+        return
+    if minutes < 1 or minutes > 120:
+        await ctx.send("❌ Minutes must be between 1 and 120.", delete_after=5)
+        return
+    test_dt = datetime.now(EST) + timedelta(minutes=minutes)
+    await create_schedule(ctx.channel, f"Test Session ({minutes}min)", session_dt=test_dt)
 
 # ----------------------------
 # Force next session
 # ----------------------------
-@bot.command()
+@bot.command(help="Force-post the next upcoming scheduled session.")
 async def force(ctx):
     now = datetime.now(EST)
     next_session = None
@@ -757,7 +832,7 @@ async def force(ctx):
 # ----------------------------
 # Admin Commands
 # ----------------------------
-@bot.command()
+@bot.command(help="Set max attendees (1–50). Admin only. Usage: !setmax <n>")
 async def setmax(ctx, n: int):
     if not await check_admin(ctx):
         return
@@ -771,7 +846,7 @@ async def setmax(ctx, n: int):
     if schedule_view:
         await schedule_view.update_embed()
 
-@bot.command()
+@bot.command(help="Add a recurring session day. Admin only. Usage: !addday Thursday 20")
 async def addday(ctx, weekday: str, hour: int):
     """Add a session day. Usage: !addday Thursday 20 (for 8PM)"""
     if not await check_admin(ctx):
@@ -804,7 +879,7 @@ async def addday(ctx, weekday: str, hour: int):
     ampm = "AM" if hour < 12 else "PM"
     await ctx.send(f"✅ Added **{weekday.capitalize()} {h12}{ampm}** session.")
 
-@bot.command()
+@bot.command(help="Remove a session day. Admin only. Usage: !removeday Thursday")
 async def removeday(ctx, weekday: str):
     """Remove a session day. Usage: !removeday Thursday"""
     if not await check_admin(ctx):
@@ -825,7 +900,7 @@ async def removeday(ctx, weekday: str):
     save_state()
     await ctx.send(f"✅ Removed all sessions on **{weekday.capitalize()}**.")
 
-@bot.command()
+@bot.command(help="Remove a user from all lists. Admin only. Usage: !kick @user")
 async def kick(ctx, member: discord.Member):
     """Remove a user from all lists. Usage: !kick @user"""
     if not await check_admin(ctx):
@@ -850,7 +925,7 @@ async def kick(ctx, member: discord.Member):
     else:
         await ctx.send(f"❌ {member.mention} is not in any list.")
 
-@bot.command()
+@bot.command(help="Reset a user's attendance stats. Admin only. Usage: !resetstats @user")
 async def resetstats(ctx, member: discord.Member):
     """Reset a user's attendance stats. Usage: !resetstats @user"""
     if not await check_admin(ctx):
@@ -866,7 +941,7 @@ async def resetstats(ctx, member: discord.Member):
     else:
         await ctx.send(f"❌ No stats found for {member.mention}")
 
-@bot.command()
+@bot.command(help="Set check-in grace period (5–120 min). Admin only. Usage: !setgrace 30")
 async def setgrace(ctx, minutes: int):
     """Set check-in grace period. Usage: !setgrace 30"""
     if not await check_admin(ctx):
@@ -879,7 +954,7 @@ async def setgrace(ctx, minutes: int):
     save_state()
     await ctx.send(f"✅ Check-in grace period set to **{minutes} minutes**")
 
-@bot.command()
+@bot.command(help="Set no-show threshold for auto-standby. Admin only. Usage: !setnoshow 3")
 async def setnoshow(ctx, n: int):
     """Set no-show threshold for auto-standby. Usage: !setnoshow 3"""
     if not await check_admin(ctx):
@@ -892,7 +967,7 @@ async def setnoshow(ctx, n: int):
     save_state()
     await ctx.send(f"✅ No-show threshold set to **{n}** (auto-standby after {n} no-shows)")
 
-@bot.command()
+@bot.command(help="Show current bot settings. Admin only.")
 async def settings(ctx):
     """Show current bot settings"""
     if not await check_admin(ctx):
@@ -909,7 +984,7 @@ async def settings(ctx):
 # ----------------------------
 # Stats / Leaderboard
 # ----------------------------
-@bot.command()
+@bot.command(help="Show the attendance leaderboard.")
 async def stats(ctx):
     """Show the attendance leaderboard"""
     if not attendance_history:
@@ -948,7 +1023,7 @@ async def stats(ctx):
     embed = discord.Embed(title="📊 Attendance Leaderboard", description="\n".join(lines), color=0x3498db)
     await ctx.send(embed=embed)
 
-@bot.command()
+@bot.command(help="View your personal attendance stats (private).")
 async def mystats(ctx):
     """Show your own attendance stats (private)"""
     stats = get_user_stats(ctx.author.id)
@@ -970,7 +1045,7 @@ async def mystats(ctx):
 # ----------------------------
 # Swap command
 # ----------------------------
-@bot.command()
+@bot.command(help="Request to swap spots with another user. Usage: !swap @user")
 async def swap(ctx, target: discord.Member):
     """Request to swap spots with another user. Usage: !swap @user"""
     requester = ctx.author
@@ -1004,7 +1079,7 @@ async def swap(ctx, target: discord.Member):
 # ----------------------------
 # Session days display
 # ----------------------------
-@bot.command()
+@bot.command(help="Show the configured session schedule.")
 async def days(ctx):
     """Show configured session days"""
     if not session_days:
@@ -1018,6 +1093,104 @@ async def days(ctx):
         lines.append(f"• **{sd['name']}** at {h12}{ampm} EST (posts {sd['post_hours_before']}h before)")
     embed = discord.Embed(title="📅 Session Schedule", description="\n".join(lines), color=0xe67e22)
     await ctx.send(embed=embed)
+
+# ----------------------------
+# Custom Help Command
+# ----------------------------
+@bot.command(help="Show this help menu.")
+async def help(ctx):
+    """Show a beautiful categorized help menu."""
+    # ── Everyone Commands ──
+    everyone = discord.Embed(
+        title="📖  Attendance Bot — Help Menu",
+        description="Use the buttons on the session sign-up message to **Attend**, **Standby**, **Not Attend**, or **Relieve** your spot.\n\nBelow are the available text commands:",
+        color=0x2ecc71,
+    )
+    everyone.add_field(
+        name="✅  !schedule",
+        value="Create a manual session sign-up in this channel.",
+        inline=False,
+    )
+    everyone.add_field(
+        name="📊  !stats",
+        value="Show the attendance leaderboard (top 15 by rate).",
+        inline=False,
+    )
+    everyone.add_field(
+        name="📈  !mystats",
+        value="View your personal attendance stats (only you can see it).",
+        inline=False,
+    )
+    everyone.add_field(
+        name="🔄  !swap @user",
+        value="Request to swap your attending ↔ standby spot with another user.",
+        inline=False,
+    )
+    everyone.add_field(
+        name="📅  !days",
+        value="Show the configured recurring session schedule.",
+        inline=False,
+    )
+    everyone.add_field(
+        name="⏩  !force",
+        value="Force-post the next upcoming scheduled session.",
+        inline=False,
+    )
+    everyone.set_footer(text="Buttons on the session message: Attend · Standby · Not Attending · Relieve Spot")
+
+    # ── Admin-Only Commands ──
+    admin = discord.Embed(
+        title="🔒  Admin Commands",
+        description="These commands can only be used by the bot admin.",
+        color=0xe74c3c,
+    )
+    admin.add_field(
+        name="🧪  !testsession [minutes]",
+        value="Create a quick test session (default 1 min). Example: `!testsession 5`",
+        inline=False,
+    )
+    admin.add_field(
+        name="👥  !setmax <n>",
+        value="Set the maximum number of attendees (1–50).",
+        inline=False,
+    )
+    admin.add_field(
+        name="📆  !addday <Day> <hour>",
+        value="Add a recurring session day. Example: `!addday Thursday 20` (8 PM).",
+        inline=False,
+    )
+    admin.add_field(
+        name="🗑️  !removeday <Day>",
+        value="Remove all sessions on a given day. Example: `!removeday Thursday`.",
+        inline=False,
+    )
+    admin.add_field(
+        name="👢  !kick @user",
+        value="Remove a user from attending, standby, and not-attending lists.",
+        inline=False,
+    )
+    admin.add_field(
+        name="🔄  !resetstats @user",
+        value="Reset a user's attendance history to zero.",
+        inline=False,
+    )
+    admin.add_field(
+        name="⏱️  !setgrace <minutes>",
+        value="Set the check-in grace period (5–120 min). Default: 30.",
+        inline=False,
+    )
+    admin.add_field(
+        name="⚠️  !setnoshow <n>",
+        value="Set the no-show threshold for auto-standby. Default: 3.",
+        inline=False,
+    )
+    admin.add_field(
+        name="⚙️  !settings",
+        value="Show all current bot settings.",
+        inline=False,
+    )
+
+    await ctx.send(embeds=[everyone, admin])
 
 # ----------------------------
 # Automatic Scheduler
