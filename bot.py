@@ -34,8 +34,10 @@ ALLOWED_GUILDS = [1370907957830746194, 1475253514111291594]
 SCHEDULE_CHANNEL_ID = 1370911001247223859
 EST = pytz.timezone("US/Eastern")
 
-# State file path
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+# State file path - use /app/data/ for Docker volume persistence
+DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
+os.makedirs(DATA_DIR, exist_ok=True)
+STATE_FILE = os.path.join(DATA_DIR, "state.json")
 
 # ----------------------------
 # State Management - PERSISTENCE!
@@ -491,12 +493,10 @@ async def on_ready():
     # Sync user IDs to User objects
     await sync_users_from_ids()
     
-    # Register persistent view with custom_id matching
-    bot.add_view(ScheduleView())
-    
-    # Create global schedule_view reference
+    # Create and register a single persistent ScheduleView instance
     global schedule_view
     schedule_view = ScheduleView()
+    bot.add_view(schedule_view)
     
     # Start auto scheduler
     auto_schedule_sessions.start()
