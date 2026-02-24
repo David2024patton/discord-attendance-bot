@@ -27,10 +27,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ----------------------------
 # Config
 # ----------------------------
-MAX_ATTENDING = 10
+ADMIN_ID = 740522966474948638
+DEFAULT_MAX_ATTENDING = 10
 MAX_STANDBY = 5
+NOSHOW_THRESHOLD = 3  # auto-standby after this many no-shows
 
-ALLOWED_GUILDS = [1370907957830746194, 1475253514111291594]
+ALLOWED_GUILDS = [1370907857830746194, 1475253514111291594]
 SCHEDULE_CHANNEL_ID = 1370911001247223859
 EST = pytz.timezone("US/Eastern")
 
@@ -38,14 +40,31 @@ EST = pytz.timezone("US/Eastern")
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 STATE_FILE = os.path.join(DATA_DIR, "state.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 
 # ----------------------------
-# State Management - PERSISTENCE!
+# Admin check
+# ----------------------------
+def is_admin(user):
+    return user.id == ADMIN_ID
+
+def admin_only():
+    async def predicate(ctx):
+        if not is_admin(ctx.author):
+            await ctx.send("❌ Admin only.", delete_after=5)
+            return False
+        return True
+    return commands.check(predicate)
+
+# ----------------------------
+# State Management
 # ----------------------------
 def load_state():
-    """Load state from JSON file"""
-    global attending_ids, standby_ids, not_attending_ids, pending_offer_id, event_message_id, event_channel_id, session_name, session_dt_str, last_posted_session
-    
+    global attending_ids, standby_ids, not_attending_ids, pending_offer_id
+    global event_message_id, event_channel_id, session_name, session_dt_str
+    global last_posted_session, MAX_ATTENDING, session_days, reminder_sent
+    global checkin_active, checked_in_ids, checkin_message_id
+
     try:
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE, 'r') as f:
@@ -59,11 +78,21 @@ def load_state():
                 session_name = data.get('session_name', 'Session')
                 session_dt_str = data.get('session_dt')
                 last_posted_session = data.get('last_posted_session')
+                MAX_ATTENDING = data.get('max_attending', DEFAULT_MAX_ATTENDING)
+                session_days = data.get('session_days', [
+                    {"weekday": 0, "hour": 20, "name": "Monday", "post_hours_before": 12},
+                    {"weekday": 1, "hour": 20, "name": "Tuesday", "post_hours_before": 20},
+                    {"weekday": 2, "hour": 20, "name": "Wednesday", "post_hours_before": 20},
+                ])
+                reminder_sent = data.get('reminder_sent', False)
+                checkin_active = data.get('checkin_active', False)
+                checked_in_ids = data.get('checked_in_ids', [])
+                checkin_message_id = data.get('checkin_message_id')
                 print(f"✅ Loaded state from {STATE_FILE}")
                 return True
     except Exception as e:
         print(f"❌ Error loading state: {e}")
-    
+
     # Default empty state
     attending_ids = []
     standby_ids = []
@@ -74,10 +103,19 @@ def load_state():
     session_name = 'Session'
     session_dt_str = None
     last_posted_session = None
+    MAX_ATTENDING = DEFAULT_MAX_ATTENDING
+    session_days = [
+        {"weekday": 0, "hour": 20, "name": "Monday", "post_hours_before": 12},
+        {"weekday": 1, "hour": 20, "name": "Tuesday", "post_hours_before": 20},
+        {"weekday": 2, "hour": 20, "name": "Wednesday", "post_hours_before": 20},
+    ]
+    reminder_sent = False
+    checkin_active = False
+    checked_in_ids = []
+    checkin_message_id = None
     return False
 
 def save_state():
-    """Save state to JSON file"""
     data = {
         'attending_ids': attending_ids,
         'standby_ids': standby_ids,
@@ -87,7 +125,13 @@ def save_state():
         'event_channel_id': event_channel_id,
         'session_name': session_name,
         'session_dt': session_dt_str,
-        'last_posted_session': last_posted_session
+        'last_posted_session': last_posted_session,
+        'max_attending': MAX_ATTENDING,
+        'session_days': session_days,
+        'reminder_sent': reminder_sent,
+        'checkin_active': checkin_active,
+        'checked_in_ids': checked_in_ids,
+        'checkin_message_id': checkin_message_id,
     }
     try:
         with open(STATE_FILE, 'w') as f:
@@ -95,11 +139,78 @@ def save_state():
     except Exception as e:
         print(f"❌ Error saving state: {e}")
 
+# ----------------------------
+# Attendance History
+# ----------------------------
+# Format: {user_id_str: {"attended": N, "no_shows": N, "total_signups": N, "streak": N, "best_streak": N}}
+attendance_history = {}
+
+def load_history():
+    global attendance_history
+    try:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r') as f:
+                attendance_history = json.load(f)
+            print(f"✅ Loaded history ({len(attendance_history)} users)")
+            return
+    except Exception as e:
+        print(f"❌ Error loading history: {e}")
+    attendance_history = {}
+
+def save_history():
+    try:
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(attendance_history, f, indent=2)
+    except Exception as e:
+        print(f"❌ Error saving history: {e}")
+
+def get_user_stats(user_id):
+    key = str(user_id)
+    if key not in attendance_history:
+        attendance_history[key] = {
+            "attended": 0, "no_shows": 0, "total_signups": 0,
+            "streak": 0, "best_streak": 0
+        }
+    return attendance_history[key]
+
+def record_attendance(user_id):
+    stats = get_user_stats(user_id)
+    stats["attended"] += 1
+    stats["total_signups"] += 1
+    stats["streak"] += 1
+    if stats["streak"] > stats["best_streak"]:
+        stats["best_streak"] = stats["streak"]
+    save_history()
+
+def record_no_show(user_id):
+    stats = get_user_stats(user_id)
+    stats["no_shows"] += 1
+    stats["total_signups"] += 1
+    stats["streak"] = 0  # reset streak
+    save_history()
+
+def is_auto_standby(user_id):
+    """Users with too many no-shows get auto-placed on standby"""
+    stats = get_user_stats(user_id)
+    return stats["no_shows"] >= NOSHOW_THRESHOLD
+
+def streak_badge(user_id):
+    stats = get_user_stats(user_id)
+    s = stats["streak"]
+    if s >= 10:
+        return f" 🔥{s}"
+    elif s >= 5:
+        return f" 🔥{s}"
+    elif s >= 3:
+        return f" ⚡{s}"
+    return ""
+
 # Initialize state
 load_state()
+load_history()
 
 # References to be populated at runtime
-attending = []  # List of User objects
+attending = []
 standby = []
 not_attending = []
 pending_offer = None
@@ -134,27 +245,24 @@ async def globally_allowed(ctx):
 # Sync IDs to User objects
 # ----------------------------
 async def sync_users_from_ids():
-    """Convert stored user IDs to User objects"""
     global attending, standby, not_attending, pending_offer, event_message
-    
+
     attending = []
     standby = []
     not_attending = []
     pending_offer = None
     event_message = None
-    
-    # Get a guild to fetch users from
+
     guild = None
     for g in bot.guilds:
         if g.id in ALLOWED_GUILDS:
             guild = g
             break
-    
+
     if not guild:
         print("❌ No allowed guild found")
         return
-    
-    # Sync attending
+
     for uid in attending_ids:
         try:
             member = await guild.fetch_member(uid)
@@ -162,8 +270,7 @@ async def sync_users_from_ids():
                 attending.append(member)
         except:
             pass
-    
-    # Sync standby
+
     for uid in standby_ids:
         try:
             member = await guild.fetch_member(uid)
@@ -171,8 +278,7 @@ async def sync_users_from_ids():
                 standby.append(member)
         except:
             pass
-    
-    # Sync not_attending
+
     for uid in not_attending_ids:
         try:
             member = await guild.fetch_member(uid)
@@ -180,8 +286,7 @@ async def sync_users_from_ids():
                 not_attending.append(member)
         except:
             pass
-    
-    # Sync pending_offer
+
     if pending_offer_id:
         try:
             member = await guild.fetch_member(pending_offer_id)
@@ -189,8 +294,7 @@ async def sync_users_from_ids():
                 pending_offer = member
         except:
             pass
-    
-    # Restore event message
+
     if event_message_id and event_channel_id:
         try:
             channel = await bot.fetch_channel(event_channel_id)
@@ -199,31 +303,66 @@ async def sync_users_from_ids():
                 print(f"✅ Restored event message: {event_message_id}")
         except Exception as e:
             print(f"❌ Could not restore event message: {e}")
-    
+
     print(f"✅ Synced users: {len(attending)} attending, {len(standby)} standby, {len(not_attending)} not attending")
 
 def sync_ids_from_users():
-    """Convert User objects to IDs and save"""
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
-    
+
     attending_ids = [u.id for u in attending]
     standby_ids = [u.id for u in standby]
     not_attending_ids = [u.id for u in not_attending]
     pending_offer_id = pending_offer.id if pending_offer else None
-    
+
     save_state()
 
 # ----------------------------
-# Build embed
+# Build embed (with countdown + streaks)
 # ----------------------------
 def build_embed():
-    embed = discord.Embed(title=session_name or "Session Sign-Up")
-    attend_text = "\n".join(f"{i+1}. {user.mention} ✅" for i, user in enumerate(attending)) or "None"
-    standby_text = "\n".join(f"{i+1}. {user.mention} ❓" for i, user in enumerate(standby)) or "None"
+    title = session_name or "Session Sign-Up"
+
+    # Add countdown if session time is set
+    if session_dt_str:
+        try:
+            dt = datetime.fromisoformat(session_dt_str)
+            unix_ts = int(dt.timestamp())
+            title += f"\n⏰ Starts <t:{unix_ts}:R>"
+        except:
+            pass
+
+    embed = discord.Embed(title=title, color=0x2ecc71)
+
+    # Attending list with streak badges
+    if attending:
+        attend_text = "\n".join(
+            f"{i+1}. {user.mention} ✅{streak_badge(user.id)}"
+            for i, user in enumerate(attending)
+        )
+    else:
+        attend_text = "None"
+
+    # Standby list
+    if standby:
+        standby_text = "\n".join(
+            f"{i+1}. {user.mention} ❓{streak_badge(user.id)}"
+            for i, user in enumerate(standby)
+        )
+    else:
+        standby_text = "None"
+
+    # Not attending
     not_attend_text = "\n".join(f"{user.mention} ❌" for user in not_attending) or "None"
-    embed.add_field(name=f"Attending ({MAX_ATTENDING} Max)", value=attend_text, inline=False)
-    embed.add_field(name=f"Standby ({MAX_STANDBY} Max)", value=standby_text, inline=False)
+
+    embed.add_field(name=f"Attending ({len(attending)}/{MAX_ATTENDING})", value=attend_text, inline=False)
+    embed.add_field(name=f"Standby ({len(standby)}/{MAX_STANDBY})", value=standby_text, inline=False)
     embed.add_field(name="Not Attending", value=not_attend_text, inline=False)
+
+    # No-show warning footer
+    auto_standby_users = [u for u in attending if is_auto_standby(u.id)]
+    if auto_standby_users:
+        embed.set_footer(text="⚠️ Some users have high no-show counts")
+
     return embed
 
 # ----------------------------
@@ -248,11 +387,11 @@ async def offer_next_standby():
             continue
 
 # ----------------------------
-# DM Offer View - NO TIMEOUT!
+# DM Offer View
 # ----------------------------
 class OfferView(discord.ui.View):
     def __init__(self, user):
-        super().__init__(timeout=None)  # ✅ NO TIMEOUT - buttons work forever!
+        super().__init__(timeout=None)
         self.user = user
 
     @discord.ui.button(label="Accept Spot", style=discord.ButtonStyle.success, emoji="✅", custom_id="offer_accept")
@@ -283,11 +422,126 @@ class OfferView(discord.ui.View):
         await offer_next_standby()
 
 # ----------------------------
-# Main Schedule View - NO TIMEOUT!
+# Check-In View
+# ----------------------------
+class CheckInView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Check In", style=discord.ButtonStyle.success, emoji="🟢", custom_id="checkin_button")
+    async def check_in(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user = interaction.user
+        if user.id not in attending_ids:
+            await interaction.response.send_message("You're not on the attending list.", ephemeral=True)
+            return
+        if user.id in checked_in_ids:
+            await interaction.response.send_message("You're already checked in! ✅", ephemeral=True)
+            return
+        checked_in_ids.append(user.id)
+        save_state()
+        await interaction.response.send_message(f"✅ {user.mention} checked in!", ephemeral=True)
+
+# ----------------------------
+# Swap View (DM)
+# ----------------------------
+class SwapView(discord.ui.View):
+    def __init__(self, requester_id, target_id):
+        super().__init__(timeout=300)  # 5 min timeout
+        self.requester_id = requester_id
+        self.target_id = target_id
+
+    @discord.ui.button(label="Accept Swap", style=discord.ButtonStyle.success, emoji="🔄", custom_id="swap_accept")
+    async def accept_swap(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.target_id:
+            await interaction.response.send_message("This is not for you.", ephemeral=True)
+            return
+        # Find both users and swap their positions
+        req_in_attending = any(u.id == self.requester_id for u in attending)
+        req_in_standby = any(u.id == self.requester_id for u in standby)
+        tgt_in_attending = any(u.id == self.target_id for u in attending)
+        tgt_in_standby = any(u.id == self.target_id for u in standby)
+
+        # Do the swap
+        if req_in_attending and tgt_in_standby:
+            req_user = next(u for u in attending if u.id == self.requester_id)
+            tgt_user = next(u for u in standby if u.id == self.target_id)
+            attending.remove(req_user)
+            standby.remove(tgt_user)
+            attending.append(tgt_user)
+            standby.append(req_user)
+        elif req_in_standby and tgt_in_attending:
+            req_user = next(u for u in standby if u.id == self.requester_id)
+            tgt_user = next(u for u in attending if u.id == self.target_id)
+            standby.remove(req_user)
+            attending.remove(tgt_user)
+            standby.append(tgt_user)
+            attending.append(req_user)
+        else:
+            await interaction.response.edit_message(content="❌ Swap failed — positions changed.", view=None)
+            return
+
+        sync_ids_from_users()
+        await interaction.response.edit_message(content="✅ Swap complete!", view=None)
+        if schedule_view:
+            await schedule_view.update_embed()
+
+        # Notify requester
+        try:
+            req_user_obj = await bot.fetch_user(self.requester_id)
+            await req_user_obj.send("✅ Your swap was accepted!")
+        except:
+            pass
+
+    @discord.ui.button(label="Decline Swap", style=discord.ButtonStyle.danger, emoji="❌", custom_id="swap_decline")
+    async def decline_swap(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.target_id:
+            await interaction.response.send_message("This is not for you.", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="❌ Swap declined.", view=None)
+        try:
+            req_user_obj = await bot.fetch_user(self.requester_id)
+            await req_user_obj.send("❌ Your swap request was declined.")
+        except:
+            pass
+
+# ----------------------------
+# Reminder Confirm/Drop View (DM)
+# ----------------------------
+class ReminderView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+
+    @discord.ui.button(label="Still Coming!", style=discord.ButtonStyle.success, emoji="👍", custom_id="reminder_confirm")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return
+        await interaction.response.edit_message(content="👍 Great, see you there!", view=None)
+
+    @discord.ui.button(label="Can't Make It", style=discord.ButtonStyle.danger, emoji="👋", custom_id="reminder_drop")
+    async def drop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            return
+        # Remove from attending
+        user = interaction.user
+        to_remove = [u for u in attending if u.id == user.id]
+        for u in to_remove:
+            attending.remove(u)
+        if user not in not_attending:
+            # Need a Member object; user from DM is a User not Member
+            not_attending_ids.append(user.id)
+        sync_ids_from_users()
+        await interaction.response.edit_message(content="👋 Removed from attending. Your spot has been offered to standby.", view=None)
+        await offer_next_standby()
+        if schedule_view:
+            await schedule_view.update_embed()
+
+# ----------------------------
+# Main Schedule View
 # ----------------------------
 class ScheduleView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # ✅ NO TIMEOUT - buttons work forever!
+        super().__init__(timeout=None)
 
     async def update_embed(self):
         if event_message:
@@ -304,6 +558,21 @@ class ScheduleView(discord.ui.View):
             return
         if user in not_attending:
             not_attending.remove(user)
+
+        # No-show penalty: auto-standby if too many no-shows
+        if is_auto_standby(user.id):
+            if len(standby) < MAX_STANDBY:
+                standby.append(user)
+                sync_ids_from_users()
+                await interaction.response.send_message(
+                    f"⚠️ Due to {NOSHOW_THRESHOLD}+ no-shows, you've been placed on **standby**. Check in to improve your standing!",
+                    ephemeral=True
+                )
+                await self.update_embed()
+            else:
+                await interaction.response.send_message("Standby is full.", ephemeral=True)
+            return
+
         if len(attending) < MAX_ATTENDING and pending_offer is None:
             attending.append(user)
         else:
@@ -375,19 +644,24 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     global attending, standby, not_attending, pending_offer, event_message, schedule_view
     global session_name, session_dt_str, event_message_id, event_channel_id
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
-    
+    global reminder_sent, checkin_active, checked_in_ids, checkin_message_id
+
     # Clear runtime lists
     attending.clear()
     standby.clear()
     not_attending.clear()
     pending_offer = None
-    
+
     # Clear persisted IDs
     attending_ids = []
     standby_ids = []
     not_attending_ids = []
     pending_offer_id = None
-    
+    reminder_sent = False
+    checkin_active = False
+    checked_in_ids = []
+    checkin_message_id = None
+
     # Store session info
     session_name = session_name_arg
     session_dt_str = session_dt.isoformat() if session_dt else None
@@ -399,14 +673,14 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     else:
         title = f"Session Sign-Up: {session_name_arg}"
 
-    embed = discord.Embed(title=title)
-    embed.add_field(name=f"Attending ({MAX_ATTENDING} Max)", value="None", inline=False)
-    embed.add_field(name=f"Standby ({MAX_STANDBY} Max)", value="None", inline=False)
+    embed = discord.Embed(title=title, color=0x2ecc71)
+    embed.add_field(name=f"Attending (0/{MAX_ATTENDING})", value="None", inline=False)
+    embed.add_field(name=f"Standby (0/{MAX_STANDBY})", value="None", inline=False)
     embed.add_field(name="Not Attending", value="None", inline=False)
 
     schedule_view = ScheduleView()
     event_message = await channel.send(content="@everyone", embed=embed, view=schedule_view)
-    
+
     # Save message info for persistence
     event_message_id = event_message.id
     event_channel_id = channel.id
@@ -430,20 +704,20 @@ async def testsession(ctx):
 @bot.command()
 async def force(ctx):
     now = datetime.now(EST)
-    session_days = [0, 1, 2]  # Monday, Tuesday, Wednesday
     next_session = None
+    session_name_arg = None
 
-    for day in session_days:
-        session_dt = next_run_time(20, day)
+    for sd in session_days:
+        session_dt = next_run_time(sd["hour"], sd["weekday"])
         if session_dt >= now:
             next_session = session_dt
-            session_name_arg = f"{session_dt.strftime('%A')} 8PM EST Session"
+            session_name_arg = f"{sd['name']} {sd['hour'] % 12 or 12}{'AM' if sd['hour'] < 12 else 'PM'} EST Session"
             break
 
     if not next_session:
-        # fallback to first day of next week
-        next_session = next_run_time(20, session_days[0])
-        session_name_arg = f"{next_session.strftime('%A')} 8PM EST Session"
+        sd = session_days[0]
+        next_session = next_run_time(sd["hour"], sd["weekday"])
+        session_name_arg = f"{sd['name']} {sd['hour'] % 12 or 12}{'AM' if sd['hour'] < 12 else 'PM'} EST Session"
 
     try:
         channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
@@ -451,6 +725,226 @@ async def force(ctx):
         await ctx.send(f"✅ Forced creation of session: {session_name_arg}")
     except Exception as e:
         await ctx.send(f"❌ Failed to post session: {e}")
+
+# ----------------------------
+# Admin Commands
+# ----------------------------
+@bot.command()
+@admin_only()
+async def setmax(ctx, n: int):
+    global MAX_ATTENDING
+    if n < 1 or n > 50:
+        await ctx.send("❌ Max must be between 1 and 50.")
+        return
+    MAX_ATTENDING = n
+    save_state()
+    await ctx.send(f"✅ Max attending set to **{n}**")
+    if schedule_view:
+        await schedule_view.update_embed()
+
+@bot.command()
+@admin_only()
+async def addday(ctx, weekday: str, hour: int):
+    """Add a session day. Usage: !addday Thursday 20 (for 8PM)"""
+    day_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+               "friday": 4, "saturday": 5, "sunday": 6}
+    day_lower = weekday.lower()
+    if day_lower not in day_map:
+        await ctx.send(f"❌ Invalid day. Use: {', '.join(day_map.keys())}")
+        return
+    if hour < 0 or hour > 23:
+        await ctx.send("❌ Hour must be 0-23 (24h format).")
+        return
+
+    wd = day_map[day_lower]
+    # Check for duplicate
+    for sd in session_days:
+        if sd["weekday"] == wd and sd["hour"] == hour:
+            await ctx.send("❌ That session day/time already exists.")
+            return
+
+    session_days.append({
+        "weekday": wd,
+        "hour": hour,
+        "name": weekday.capitalize(),
+        "post_hours_before": 20
+    })
+    save_state()
+    h12 = hour % 12 or 12
+    ampm = "AM" if hour < 12 else "PM"
+    await ctx.send(f"✅ Added **{weekday.capitalize()} {h12}{ampm}** session.")
+
+@bot.command()
+@admin_only()
+async def removeday(ctx, weekday: str):
+    """Remove a session day. Usage: !removeday Thursday"""
+    day_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+               "friday": 4, "saturday": 5, "sunday": 6}
+    day_lower = weekday.lower()
+    if day_lower not in day_map:
+        await ctx.send(f"❌ Invalid day. Use: {', '.join(day_map.keys())}")
+        return
+
+    wd = day_map[day_lower]
+    before = len(session_days)
+    session_days[:] = [sd for sd in session_days if sd["weekday"] != wd]
+    if len(session_days) == before:
+        await ctx.send(f"❌ No sessions on {weekday.capitalize()} to remove.")
+        return
+    save_state()
+    await ctx.send(f"✅ Removed all sessions on **{weekday.capitalize()}**.")
+
+@bot.command()
+@admin_only()
+async def kick(ctx, member: discord.Member):
+    """Remove a user from all lists. Usage: !kick @user"""
+    removed_from = []
+    if member in attending:
+        attending.remove(member)
+        removed_from.append("attending")
+    if member in standby:
+        standby.remove(member)
+        removed_from.append("standby")
+    if member in not_attending:
+        not_attending.remove(member)
+        removed_from.append("not attending")
+
+    if removed_from:
+        sync_ids_from_users()
+        await offer_next_standby()
+        if schedule_view:
+            await schedule_view.update_embed()
+        await ctx.send(f"✅ Removed {member.mention} from: {', '.join(removed_from)}")
+    else:
+        await ctx.send(f"❌ {member.mention} is not in any list.")
+
+@bot.command()
+@admin_only()
+async def resetstats(ctx, member: discord.Member):
+    """Reset a user's attendance stats. Usage: !resetstats @user"""
+    key = str(member.id)
+    if key in attendance_history:
+        attendance_history[key] = {
+            "attended": 0, "no_shows": 0, "total_signups": 0,
+            "streak": 0, "best_streak": 0
+        }
+        save_history()
+        await ctx.send(f"✅ Reset stats for {member.mention}")
+    else:
+        await ctx.send(f"❌ No stats found for {member.mention}")
+
+# ----------------------------
+# Stats / Leaderboard
+# ----------------------------
+@bot.command()
+async def stats(ctx):
+    """Show the attendance leaderboard"""
+    if not attendance_history:
+        await ctx.send("📊 No attendance data yet.")
+        return
+
+    # Sort by attendance rate
+    entries = []
+    guild = ctx.guild
+    for uid_str, data in attendance_history.items():
+        total = data.get("total_signups", 0)
+        if total == 0:
+            continue
+        attended = data.get("attended", 0)
+        no_shows = data.get("no_shows", 0)
+        streak = data.get("streak", 0)
+        rate = (attended / total) * 100
+        try:
+            member = guild.get_member(int(uid_str))
+            name = member.display_name if member else f"User {uid_str}"
+        except:
+            name = f"User {uid_str}"
+
+        entries.append((name, attended, total, rate, streak, no_shows))
+
+    entries.sort(key=lambda x: x[3], reverse=True)  # sort by rate
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = []
+    for i, (name, attended, total, rate, streak, no_shows) in enumerate(entries[:15]):
+        medal = medals[i] if i < 3 else f"{i+1}."
+        streak_str = f" 🔥{streak}" if streak >= 3 else ""
+        noshow_str = f" ⚠️{no_shows}NS" if no_shows > 0 else ""
+        lines.append(f"{medal} **{name}** — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
+
+    embed = discord.Embed(title="📊 Attendance Leaderboard", description="\n".join(lines), color=0x3498db)
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def mystats(ctx):
+    """Show your own attendance stats (private)"""
+    stats = get_user_stats(ctx.author.id)
+    total = stats["total_signups"]
+    rate = (stats["attended"] / total * 100) if total > 0 else 0
+    embed = discord.Embed(title=f"📊 Your Stats", color=0x9b59b6)
+    embed.add_field(name="Sessions Attended", value=str(stats["attended"]), inline=True)
+    embed.add_field(name="No-Shows", value=str(stats["no_shows"]), inline=True)
+    embed.add_field(name="Total Sign-Ups", value=str(stats["total_signups"]), inline=True)
+    embed.add_field(name="Attendance Rate", value=f"{rate:.0f}%", inline=True)
+    embed.add_field(name="Current Streak", value=f"{'🔥' if stats['streak'] >= 3 else ''}{stats['streak']}", inline=True)
+    embed.add_field(name="Best Streak", value=str(stats["best_streak"]), inline=True)
+
+    if is_auto_standby(ctx.author.id):
+        embed.set_footer(text=f"⚠️ You have {stats['no_shows']} no-shows — auto-placed on standby until improved.")
+
+    await ctx.send(embed=embed, ephemeral=True)
+
+# ----------------------------
+# Swap command
+# ----------------------------
+@bot.command()
+async def swap(ctx, target: discord.Member):
+    """Request to swap spots with another user. Usage: !swap @user"""
+    requester = ctx.author
+    if requester == target:
+        await ctx.send("❌ You can't swap with yourself.", delete_after=5)
+        return
+
+    # Verify both are in some list
+    req_in = requester in attending or requester in standby
+    tgt_in = target in attending or target in standby
+    if not req_in or not tgt_in:
+        await ctx.send("❌ Both users must be on attending or standby to swap.", delete_after=5)
+        return
+
+    # Same list = no point
+    if (requester in attending and target in attending) or (requester in standby and target in standby):
+        await ctx.send("❌ You're both in the same list — nothing to swap.", delete_after=5)
+        return
+
+    try:
+        await target.send(
+            f"🔄 **{requester.display_name}** wants to swap spots with you!\n"
+            f"They are {'attending' if requester in attending else 'on standby'}, "
+            f"you are {'attending' if target in attending else 'on standby'}.",
+            view=SwapView(requester.id, target.id)
+        )
+        await ctx.send(f"✅ Swap request sent to {target.mention}!", delete_after=10)
+    except:
+        await ctx.send(f"❌ Couldn't DM {target.mention}. They may have DMs disabled.", delete_after=10)
+
+# ----------------------------
+# Session days display
+# ----------------------------
+@bot.command()
+async def days(ctx):
+    """Show configured session days"""
+    if not session_days:
+        await ctx.send("📅 No session days configured.")
+        return
+    lines = []
+    for sd in sorted(session_days, key=lambda x: x["weekday"]):
+        h = sd["hour"]
+        h12 = h % 12 or 12
+        ampm = "AM" if h < 12 else "PM"
+        lines.append(f"• **{sd['name']}** at {h12}{ampm} EST (posts {sd['post_hours_before']}h before)")
+    embed = discord.Embed(title="📅 Session Schedule", description="\n".join(lines), color=0xe67e22)
+    await ctx.send(embed=embed)
 
 # ----------------------------
 # Automatic Scheduler
@@ -463,20 +957,16 @@ async def auto_schedule_sessions():
     if not channel:
         return
 
-    # Tightened to ±30s so consecutive 1-min ticks never overlap
     window_start = now - timedelta(seconds=30)
     window_end = now + timedelta(seconds=30)
 
-    sessions = [
-        ("Monday 8PM EST Session", next_run_time(20, 0), 12),
-        ("Tuesday 8PM EST Session", next_run_time(20, 1), 20),
-        ("Wednesday 8PM EST Session", next_run_time(20, 2), 20),
-    ]
-
-    for name, session_dt, hours_before in sessions:
-        post_dt = session_dt - timedelta(hours=hours_before)
+    for sd in session_days:
+        session_dt = next_run_time(sd["hour"], sd["weekday"])
+        post_dt = session_dt - timedelta(hours=sd["post_hours_before"])
         if window_start <= post_dt <= window_end:
-            # Deduplicate: don't re-post the same session
+            h12 = sd["hour"] % 12 or 12
+            ampm = "AM" if sd["hour"] < 12 else "PM"
+            name = f"{sd['name']} {h12}{ampm} EST Session"
             session_key = f"{name}_{session_dt.isoformat()}"
             if last_posted_session == session_key:
                 print(f"⏩ Skipping duplicate post for: {name}")
@@ -487,40 +977,228 @@ async def auto_schedule_sessions():
             return
 
 # ----------------------------
+# Reminder DMs (1 hour before)
+# ----------------------------
+@tasks.loop(minutes=1)
+async def session_reminders():
+    global reminder_sent
+    if not session_dt_str or reminder_sent:
+        return
+
+    try:
+        session_dt = datetime.fromisoformat(session_dt_str)
+        now = datetime.now(session_dt.tzinfo or EST)
+        time_until = (session_dt - now).total_seconds()
+
+        # 1 hour before (between 55-65 min before to catch window)
+        if 55 * 60 <= time_until <= 65 * 60:
+            reminder_sent = True
+            save_state()
+            count = 0
+            for uid in attending_ids:
+                try:
+                    user = await bot.fetch_user(uid)
+                    unix_ts = int(session_dt.timestamp())
+                    await user.send(
+                        f"⏰ **Reminder!** Session starts <t:{unix_ts}:R>!\n"
+                        f"📋 **{session_name}**\n\nAre you still coming?",
+                        view=ReminderView(uid)
+                    )
+                    count += 1
+                except Exception as e:
+                    print(f"❌ Couldn't remind user {uid}: {e}")
+            print(f"📨 Sent reminders to {count} attendees")
+    except Exception as e:
+        print(f"❌ Reminder error: {e}")
+
+# ----------------------------
+# Check-In & No-Show Detection
+# ----------------------------
+@tasks.loop(minutes=1)
+async def checkin_manager():
+    global checkin_active, checkin_message_id
+    if not session_dt_str:
+        return
+
+    try:
+        session_dt = datetime.fromisoformat(session_dt_str)
+        now = datetime.now(session_dt.tzinfo or EST)
+        minutes_after = (now - session_dt).total_seconds() / 60
+
+        # At session start: post check-in button
+        if 0 <= minutes_after <= 2 and not checkin_active:
+            checkin_active = True
+            channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
+            if channel:
+                checkin_view = CheckInView()
+                msg = await channel.send(
+                    "🟢 **Session is starting!** Attendees, please check in below.\n"
+                    "You have **15 minutes** to check in or you'll be marked as a no-show.",
+                    view=checkin_view
+                )
+                checkin_message_id = msg.id
+                save_state()
+                print("✅ Check-in posted")
+
+        # 15 min after: process no-shows
+        if 15 <= minutes_after <= 17 and checkin_active:
+            checkin_active = False
+            no_show_users = []
+            checked_in_users = []
+
+            for uid in attending_ids:
+                if uid in checked_in_ids:
+                    record_attendance(uid)
+                    checked_in_users.append(uid)
+                else:
+                    record_no_show(uid)
+                    no_show_users.append(uid)
+
+                    # Warn on 2nd no-show
+                    stats = get_user_stats(uid)
+                    if stats["no_shows"] == NOSHOW_THRESHOLD - 1:
+                        try:
+                            user = await bot.fetch_user(uid)
+                            await user.send(
+                                f"⚠️ **Warning:** You have **{stats['no_shows']}** no-shows. "
+                                f"One more and you'll be auto-placed on **standby** for future sessions."
+                            )
+                        except:
+                            pass
+
+            save_state()
+
+            # Post no-show results
+            if no_show_users:
+                channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
+                if channel:
+                    mentions = []
+                    for uid in no_show_users:
+                        try:
+                            user = await bot.fetch_user(uid)
+                            mentions.append(user.mention)
+                        except:
+                            mentions.append(f"<@{uid}>")
+                    await channel.send(
+                        f"❌ **No-shows ({len(no_show_users)}):** {', '.join(mentions)}\n"
+                        f"✅ **Checked in ({len(checked_in_users)}):** {len(checked_in_users)} players"
+                    )
+
+            print(f"📊 Check-in complete: {len(checked_in_users)} checked in, {len(no_show_users)} no-shows")
+    except Exception as e:
+        print(f"❌ Check-in manager error: {e}")
+
+# ----------------------------
+# Weekly Summary (Sunday 10PM EST)
+# ----------------------------
+weekly_summary_sent_week = None
+
+@tasks.loop(minutes=1)
+async def weekly_summary():
+    global weekly_summary_sent_week
+    now = datetime.now(EST)
+
+    # Sunday = 6, 10 PM
+    if now.weekday() != 6 or now.hour != 22:
+        return
+
+    week_key = now.isocalendar()[1]
+    if weekly_summary_sent_week == week_key:
+        return
+
+    weekly_summary_sent_week = week_key
+
+    if not attendance_history:
+        return
+
+    try:
+        channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
+        if not channel:
+            return
+
+        # Calculate weekly stats
+        total_sessions = len([sd for sd in session_days])  # sessions per week
+        total_attended = sum(d.get("attended", 0) for d in attendance_history.values())
+        total_signups = sum(d.get("total_signups", 0) for d in attendance_history.values())
+
+        # Find MVP (highest streak this week)
+        mvp_id = None
+        mvp_streak = 0
+        for uid_str, data in attendance_history.items():
+            if data.get("streak", 0) > mvp_streak:
+                mvp_streak = data["streak"]
+                mvp_id = uid_str
+
+        mvp_mention = ""
+        if mvp_id:
+            try:
+                mvp_user = await bot.fetch_user(int(mvp_id))
+                mvp_mention = f"\n🏆 **MVP:** {mvp_user.mention} (🔥{mvp_streak} streak)"
+            except:
+                mvp_mention = f"\n🏆 **MVP:** User {mvp_id} (🔥{mvp_streak} streak)"
+
+        embed = discord.Embed(
+            title="📈 Weekly Summary",
+            description=(
+                f"**Sessions this week:** {total_sessions}\n"
+                f"**Total sign-ups (all time):** {total_signups}\n"
+                f"**Total attendances (all time):** {total_attended}"
+                f"{mvp_mention}"
+            ),
+            color=0xf39c12
+        )
+        await channel.send(embed=embed)
+        print("📈 Weekly summary posted")
+    except Exception as e:
+        print(f"❌ Weekly summary error: {e}")
+
+# ----------------------------
 # Bot ready
 # ----------------------------
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    
+
     # Restore state from file
     load_state()
-    
+    load_history()
+
     # Sync user IDs to User objects
     await sync_users_from_ids()
-    
-    # Create and register a single persistent ScheduleView instance
+
+    # Create and register persistent views
     global schedule_view
     schedule_view = ScheduleView()
     bot.add_view(schedule_view)
-    
-    # Start auto scheduler (guard against duplicate starts on reconnect)
+    bot.add_view(OfferView(None))  # register for DM button persistence
+    bot.add_view(CheckInView())
+
+    # Start task loops (guard against duplicate starts on reconnect)
     if not auto_schedule_sessions.is_running():
         auto_schedule_sessions.start()
-    
+    if not session_reminders.is_running():
+        session_reminders.start()
+    if not checkin_manager.is_running():
+        checkin_manager.start()
+    if not weekly_summary.is_running():
+        weekly_summary.start()
+
     print("✅ Bot is ready!")
+    print(f"   Admin: {ADMIN_ID}")
+    print(f"   Max attending: {MAX_ATTENDING}")
+    print(f"   Session days: {len(session_days)}")
+    print(f"   History: {len(attendance_history)} users tracked")
 
 # ----------------------------
 # Run Bot
 # ----------------------------
 async def main():
-    # Get token from environment variable
     token = os.environ.get("DISCORD_BOT_TOKEN")
     if not token:
         print("❌ DISCORD_BOT_TOKEN environment variable not set!")
         print("Set it with: export DISCORD_BOT_TOKEN='your_token_here'")
         return
-    
+
     async with bot:
         await bot.start(token)
 
