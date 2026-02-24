@@ -745,38 +745,53 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
 # Live Countdown Timer
 # ----------------------------
 async def _run_countdown():
-    """Edits the session embed every 10s with a live countdown until the session starts."""
+    """Edits the session embed with a live countdown, then elapsed time after start."""
     global event_message, session_dt_str
+    started = False
     try:
         while True:
-            await asyncio.sleep(10)
+            # Before start: update every 10s. After start: every 30s.
+            await asyncio.sleep(10 if not started else 30)
             if not event_message or not session_dt_str:
                 return
             try:
                 session_dt = datetime.fromisoformat(session_dt_str)
                 now = datetime.now(session_dt.tzinfo or EST)
                 remaining = (session_dt - now).total_seconds()
-                if remaining <= 0:
-                    # Session started — update embed one final time
+
+                if remaining > 0:
+                    # ── COUNTING DOWN ──
+                    mins, secs = divmod(int(remaining), 60)
+                    hours, mins = divmod(mins, 60)
+                    if hours > 0:
+                        countdown_str = f"{hours}h {mins}m {secs}s"
+                    elif mins > 0:
+                        countdown_str = f"{mins}m {secs}s"
+                    else:
+                        countdown_str = f"{secs}s"
                     if schedule_view:
                         embed = build_embed()
-                        embed.set_footer(text="🟢 Session has started!")
+                        embed.set_footer(text=f"⏰ Starts in {countdown_str}")
                         await event_message.edit(embed=embed, view=schedule_view)
-                    return
-                # Build human-readable countdown
-                mins, secs = divmod(int(remaining), 60)
-                hours, mins = divmod(mins, 60)
-                if hours > 0:
-                    countdown_str = f"{hours}h {mins}m {secs}s"
-                elif mins > 0:
-                    countdown_str = f"{mins}m {secs}s"
                 else:
-                    countdown_str = f"{secs}s"
-                # Edit the embed with updated countdown
-                if schedule_view:
-                    embed = build_embed()
-                    embed.set_footer(text=f"⏰ Starts in {countdown_str}")
-                    await event_message.edit(embed=embed, view=schedule_view)
+                    # ── SESSION STARTED — show elapsed time ──
+                    started = True
+                    elapsed = int(abs(remaining))
+                    mins, secs = divmod(elapsed, 60)
+                    hours, mins = divmod(mins, 60)
+                    if hours > 0:
+                        elapsed_str = f"{hours}h {mins}m ago"
+                    elif mins > 0:
+                        elapsed_str = f"{mins}m ago"
+                    else:
+                        elapsed_str = f"{secs}s ago"
+                    if schedule_view:
+                        embed = build_embed()
+                        embed.set_footer(text=f"⏰ Started {elapsed_str} · 🟢 Session has started!")
+                        await event_message.edit(embed=embed, view=schedule_view)
+                    # Stop updating after 2 hours post-start
+                    if elapsed >= 7200:
+                        return
             except discord.NotFound:
                 return  # message was deleted
             except discord.HTTPException:
