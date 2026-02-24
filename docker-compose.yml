@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  discord-attendance-bot:
+    build: .
+    container_name: discord-attendance-bot
+    restart: unless-stopped
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
