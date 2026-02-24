@@ -46,7 +46,15 @@ HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 # Admin check
 # ----------------------------
 def is_admin(user):
-    return user.id == ADMIN_ID
+    """True if user is the hardcoded admin, has the 'Admin' role, or has server admin perms."""
+    if user.id == ADMIN_ID:
+        return True
+    # Check Discord roles (works for Member objects, not User objects from DMs)
+    if hasattr(user, 'roles'):
+        for role in user.roles:
+            if role.name.lower() == 'admin' or role.permissions.administrator:
+                return True
+    return False
 
 async def check_admin(ctx):
     """Returns True if admin. Sends error and returns False if not."""
@@ -54,6 +62,17 @@ async def check_admin(ctx):
         return True
     await ctx.send("❌ Admin only.", delete_after=5)
     return False
+
+def session_has_started():
+    """Returns True if the session datetime has passed."""
+    if not session_dt_str:
+        return False
+    try:
+        session_dt = datetime.fromisoformat(session_dt_str)
+        now = datetime.now(session_dt.tzinfo or EST)
+        return now >= session_dt
+    except:
+        return False
 
 # ----------------------------
 # State Management
@@ -576,6 +595,9 @@ class ScheduleView(discord.ui.View):
     @discord.ui.button(label="Attend", style=discord.ButtonStyle.success, emoji="✅", custom_id="schedule_attend")
     async def attend(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
+        if session_has_started():
+            await interaction.response.send_message("🔒 Session has already started — sign-ups are closed.", ephemeral=True)
+            return
         if user in attending:
             await interaction.response.send_message("You're already attending!", ephemeral=True)
             return
@@ -616,6 +638,9 @@ class ScheduleView(discord.ui.View):
     @discord.ui.button(label="Maybe / Standby", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="schedule_standby")
     async def join_standby(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
+        if session_has_started():
+            await interaction.response.send_message("🔒 Session has already started — sign-ups are closed.", ephemeral=True)
+            return
         if user in standby:
             await interaction.response.send_message("You're already on standby!", ephemeral=True)
             return
@@ -631,6 +656,9 @@ class ScheduleView(discord.ui.View):
     @discord.ui.button(label="Not Attending", style=discord.ButtonStyle.danger, emoji="❌", custom_id="schedule_not_attend")
     async def not_attend(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
+        if session_has_started():
+            await interaction.response.send_message("🔒 Session has already started — sign-ups are closed.", ephemeral=True)
+            return
         removed = False
         if user in attending:
             attending.remove(user)
