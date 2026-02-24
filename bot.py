@@ -855,6 +855,7 @@ async def setnoshow(ctx, n: int):
     await ctx.send(f"✅ No-show threshold set to **{n}** (auto-standby after {n} no-shows)")
 
 @bot.command()
+@admin_only()
 async def settings(ctx):
     """Show current bot settings"""
     days_list = ", ".join(sd['name'] for sd in sorted(session_days, key=lambda x: x['weekday'])) or "None"
