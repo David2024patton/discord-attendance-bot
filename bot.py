@@ -48,13 +48,12 @@ HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 def is_admin(user):
     return user.id == ADMIN_ID
 
-def admin_only():
-    async def predicate(ctx):
-        if not is_admin(ctx.author):
-            await ctx.send("❌ Admin only.", delete_after=5)
-            return False
+async def check_admin(ctx):
+    """Returns True if admin. Sends error and returns False if not."""
+    if is_admin(ctx.author):
         return True
-    return commands.check(predicate)
+    await ctx.send("❌ Admin only.", delete_after=5)
+    return False
 
 # ----------------------------
 # State Management
@@ -247,6 +246,21 @@ async def on_guild_join(guild):
 @bot.check
 async def globally_allowed(ctx):
     return ctx.guild and ctx.guild.id in ALLOWED_GUILDS
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, commands.CheckFailure):
+        return
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f" Missing argument: {error.param.name}", delete_after=10)
+        return
+    print(f"Command error in {ctx.command}: {error}")
+    try:
+        await ctx.send(f"Error: {error}", delete_after=10)
+    except:
+        pass
 
 # ----------------------------
 # Sync IDs to User objects
@@ -727,8 +741,9 @@ async def force(ctx):
 # Admin Commands
 # ----------------------------
 @bot.command()
-@admin_only()
 async def setmax(ctx, n: int):
+    if not await check_admin(ctx):
+        return
     global MAX_ATTENDING
     if n < 1 or n > 50:
         await ctx.send("❌ Max must be between 1 and 50.")
@@ -740,9 +755,10 @@ async def setmax(ctx, n: int):
         await schedule_view.update_embed()
 
 @bot.command()
-@admin_only()
 async def addday(ctx, weekday: str, hour: int):
     """Add a session day. Usage: !addday Thursday 20 (for 8PM)"""
+    if not await check_admin(ctx):
+        return
     day_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
                "friday": 4, "saturday": 5, "sunday": 6}
     day_lower = weekday.lower()
@@ -772,9 +788,10 @@ async def addday(ctx, weekday: str, hour: int):
     await ctx.send(f"✅ Added **{weekday.capitalize()} {h12}{ampm}** session.")
 
 @bot.command()
-@admin_only()
 async def removeday(ctx, weekday: str):
     """Remove a session day. Usage: !removeday Thursday"""
+    if not await check_admin(ctx):
+        return
     day_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
                "friday": 4, "saturday": 5, "sunday": 6}
     day_lower = weekday.lower()
@@ -792,9 +809,10 @@ async def removeday(ctx, weekday: str):
     await ctx.send(f"✅ Removed all sessions on **{weekday.capitalize()}**.")
 
 @bot.command()
-@admin_only()
 async def kick(ctx, member: discord.Member):
     """Remove a user from all lists. Usage: !kick @user"""
+    if not await check_admin(ctx):
+        return
     removed_from = []
     if member in attending:
         attending.remove(member)
@@ -816,9 +834,10 @@ async def kick(ctx, member: discord.Member):
         await ctx.send(f"❌ {member.mention} is not in any list.")
 
 @bot.command()
-@admin_only()
 async def resetstats(ctx, member: discord.Member):
     """Reset a user's attendance stats. Usage: !resetstats @user"""
+    if not await check_admin(ctx):
+        return
     key = str(member.id)
     if key in attendance_history:
         attendance_history[key] = {
@@ -831,9 +850,10 @@ async def resetstats(ctx, member: discord.Member):
         await ctx.send(f"❌ No stats found for {member.mention}")
 
 @bot.command()
-@admin_only()
 async def setgrace(ctx, minutes: int):
     """Set check-in grace period. Usage: !setgrace 30"""
+    if not await check_admin(ctx):
+        return
     global CHECKIN_GRACE_MINUTES
     if minutes < 5 or minutes > 120:
         await ctx.send("❌ Grace period must be between 5 and 120 minutes.")
@@ -843,9 +863,10 @@ async def setgrace(ctx, minutes: int):
     await ctx.send(f"✅ Check-in grace period set to **{minutes} minutes**")
 
 @bot.command()
-@admin_only()
 async def setnoshow(ctx, n: int):
     """Set no-show threshold for auto-standby. Usage: !setnoshow 3"""
+    if not await check_admin(ctx):
+        return
     global NOSHOW_THRESHOLD
     if n < 1 or n > 20:
         await ctx.send("❌ Threshold must be between 1 and 20.")
@@ -855,9 +876,10 @@ async def setnoshow(ctx, n: int):
     await ctx.send(f"✅ No-show threshold set to **{n}** (auto-standby after {n} no-shows)")
 
 @bot.command()
-@admin_only()
 async def settings(ctx):
     """Show current bot settings"""
+    if not await check_admin(ctx):
+        return
     days_list = ", ".join(sd['name'] for sd in sorted(session_days, key=lambda x: x['weekday'])) or "None"
     embed = discord.Embed(title="⚙️ Bot Settings", color=0x95a5a6)
     embed.add_field(name="Max Attending", value=str(MAX_ATTENDING), inline=True)
