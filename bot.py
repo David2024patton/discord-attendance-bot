@@ -1097,100 +1097,97 @@ async def days(ctx):
 # ----------------------------
 # Custom Help Command
 # ----------------------------
-@bot.command(help="Show this help menu.")
-async def help(ctx):
-    """Show a beautiful categorized help menu."""
-    # ── Everyone Commands ──
-    everyone = discord.Embed(
+def _build_everyone_embed():
+    """Build the Everyone commands help embed."""
+    embed = discord.Embed(
         title="📖  Attendance Bot — Help Menu",
         description="Use the buttons on the session sign-up message to **Attend**, **Standby**, **Not Attend**, or **Relieve** your spot.\n\nBelow are the available text commands:",
         color=0x2ecc71,
     )
-    everyone.add_field(
-        name="✅  !schedule",
-        value="Create a manual session sign-up in this channel.",
-        inline=False,
-    )
-    everyone.add_field(
-        name="📊  !stats",
-        value="Show the attendance leaderboard (top 15 by rate).",
-        inline=False,
-    )
-    everyone.add_field(
-        name="📈  !mystats",
-        value="View your personal attendance stats (only you can see it).",
-        inline=False,
-    )
-    everyone.add_field(
-        name="🔄  !swap @user",
-        value="Request to swap your attending ↔ standby spot with another user.",
-        inline=False,
-    )
-    everyone.add_field(
-        name="📅  !days",
-        value="Show the configured recurring session schedule.",
-        inline=False,
-    )
-    everyone.add_field(
-        name="⏩  !force",
-        value="Force-post the next upcoming scheduled session.",
-        inline=False,
-    )
-    everyone.set_footer(text="Buttons on the session message: Attend · Standby · Not Attending · Relieve Spot")
+    embed.add_field(name="✅  !schedule", value="Create a manual session sign-up in this channel.", inline=False)
+    embed.add_field(name="📊  !stats", value="Show the attendance leaderboard (top 15 by rate).", inline=False)
+    embed.add_field(name="📈  !mystats", value="View your personal attendance stats (only you can see it).", inline=False)
+    embed.add_field(name="🔄  !swap @user", value="Request to swap your attending ↔ standby spot with another user.", inline=False)
+    embed.add_field(name="📅  !days", value="Show the configured recurring session schedule.", inline=False)
+    embed.add_field(name="⏩  !force", value="Force-post the next upcoming scheduled session.", inline=False)
+    embed.set_footer(text="Page 1/2 · Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+    return embed
 
-    # ── Admin-Only Commands ──
-    admin = discord.Embed(
+def _build_admin_embed():
+    """Build the Admin commands help embed."""
+    embed = discord.Embed(
         title="🔒  Admin Commands",
         description="These commands can only be used by the bot admin.",
         color=0xe74c3c,
     )
-    admin.add_field(
-        name="🧪  !testsession [minutes]",
-        value="Create a quick test session (default 1 min). Example: `!testsession 5`",
-        inline=False,
-    )
-    admin.add_field(
-        name="👥  !setmax <n>",
-        value="Set the maximum number of attendees (1–50).",
-        inline=False,
-    )
-    admin.add_field(
-        name="📆  !addday <Day> <hour>",
-        value="Add a recurring session day. Example: `!addday Thursday 20` (8 PM).",
-        inline=False,
-    )
-    admin.add_field(
-        name="🗑️  !removeday <Day>",
-        value="Remove all sessions on a given day. Example: `!removeday Thursday`.",
-        inline=False,
-    )
-    admin.add_field(
-        name="👢  !kick @user",
-        value="Remove a user from attending, standby, and not-attending lists.",
-        inline=False,
-    )
-    admin.add_field(
-        name="🔄  !resetstats @user",
-        value="Reset a user's attendance history to zero.",
-        inline=False,
-    )
-    admin.add_field(
-        name="⏱️  !setgrace <minutes>",
-        value="Set the check-in grace period (5–120 min). Default: 30.",
-        inline=False,
-    )
-    admin.add_field(
-        name="⚠️  !setnoshow <n>",
-        value="Set the no-show threshold for auto-standby. Default: 3.",
-        inline=False,
-    )
-    admin.add_field(
-        name="⚙️  !settings",
-        value="Show all current bot settings.",
-        inline=False,
-    )
+    embed.add_field(name="🧪  !testsession [minutes]", value="Create a quick test session (default 1 min). Example: `!testsession 5`", inline=False)
+    embed.add_field(name="👥  !setmax <n>", value="Set the maximum number of attendees (1–50).", inline=False)
+    embed.add_field(name="📆  !addday <Day> <hour>", value="Add a recurring session day. Example: `!addday Thursday 20` (8 PM).", inline=False)
+    embed.add_field(name="🗑️  !removeday <Day>", value="Remove all sessions on a given day. Example: `!removeday Thursday`.", inline=False)
+    embed.add_field(name="👢  !kick @user", value="Remove a user from attending, standby, and not-attending lists.", inline=False)
+    embed.add_field(name="🔄  !resetstats @user", value="Reset a user's attendance history to zero.", inline=False)
+    embed.add_field(name="⏱️  !setgrace <minutes>", value="Set the check-in grace period (5–120 min). Default: 30.", inline=False)
+    embed.add_field(name="⚠️  !setnoshow <n>", value="Set the no-show threshold for auto-standby. Default: 3.", inline=False)
+    embed.add_field(name="⚙️  !settings", value="Show all current bot settings.", inline=False)
+    embed.set_footer(text="Page 2/2 · Admin only")
+    return embed
 
-    await ctx.send(embeds=[everyone, admin])
+class HelpView(discord.ui.View):
+    """Interactive help menu with page-navigation buttons."""
+    def __init__(self, user_id, show_admin=False):
+        super().__init__(timeout=120)  # buttons expire after 2 min
+        self.user_id = user_id
+        self.show_admin = show_admin
+        # Only add the admin button if the user is admin
+        if not show_admin:
+            self.remove_item(self.show_admin_page)
+
+    @discord.ui.button(label="Everyone Commands", style=discord.ButtonStyle.success, emoji="📖")
+    async def show_everyone_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This help menu isn't for you. Type `!help` to get your own!", ephemeral=True)
+            return
+        footer = "Page 1/2 · Session buttons: Attend · Standby · Not Attending · Relieve Spot" if self.show_admin else "Session buttons: Attend · Standby · Not Attending · Relieve Spot"
+        embed = _build_everyone_embed()
+        embed.set_footer(text=footer)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Admin Commands", style=discord.ButtonStyle.danger, emoji="🔒")
+    async def show_admin_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This help menu isn't for you. Type `!help` to get your own!", ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=_build_admin_embed(), view=self)
+
+@bot.command(help="Show this help menu.")
+async def help(ctx):
+    """DM the user a beautiful interactive help menu."""
+    # Delete the !help message from the channel to keep it clean
+    try:
+        await ctx.message.delete()
+    except Exception:
+        pass
+
+    user_is_admin = is_admin(ctx.author)
+    view = HelpView(ctx.author.id, show_admin=user_is_admin)
+
+    # Set the right footer for the initial embed
+    embed = _build_everyone_embed()
+    if user_is_admin:
+        embed.set_footer(text="Page 1/2 · Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+    else:
+        embed.set_footer(text="Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+
+    # DM the help menu so only they can see it
+    try:
+        await ctx.author.send(embed=embed, view=view)
+    except discord.Forbidden:
+        # Fallback: if DMs are disabled, send in channel with a short auto-delete
+        view2 = HelpView(ctx.author.id, show_admin=user_is_admin)
+        await ctx.send(
+            f"{ctx.author.mention} I couldn't DM you — here's the help (auto-deletes in 30s):",
+            embed=embed, view=view2, delete_after=30
+        )
 
 # ----------------------------
 # Automatic Scheduler
