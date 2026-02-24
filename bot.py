@@ -44,7 +44,7 @@ STATE_FILE = os.path.join(DATA_DIR, "state.json")
 # ----------------------------
 def load_state():
     """Load state from JSON file"""
-    global attending_ids, standby_ids, not_attending_ids, pending_offer_id, event_message_id, event_channel_id, session_name, session_dt_str
+    global attending_ids, standby_ids, not_attending_ids, pending_offer_id, event_message_id, event_channel_id, session_name, session_dt_str, last_posted_session
     
     try:
         if os.path.exists(STATE_FILE):
@@ -58,6 +58,7 @@ def load_state():
                 event_channel_id = data.get('event_channel_id')
                 session_name = data.get('session_name', 'Session')
                 session_dt_str = data.get('session_dt')
+                last_posted_session = data.get('last_posted_session')
                 print(f"✅ Loaded state from {STATE_FILE}")
                 return True
     except Exception as e:
@@ -72,6 +73,7 @@ def load_state():
     event_channel_id = None
     session_name = 'Session'
     session_dt_str = None
+    last_posted_session = None
     return False
 
 def save_state():
@@ -84,7 +86,8 @@ def save_state():
         'event_message_id': event_message_id,
         'event_channel_id': event_channel_id,
         'session_name': session_name,
-        'session_dt': session_dt_str
+        'session_dt': session_dt_str,
+        'last_posted_session': last_posted_session
     }
     try:
         with open(STATE_FILE, 'w') as f:
@@ -454,31 +457,34 @@ async def force(ctx):
 # ----------------------------
 @tasks.loop(minutes=1)
 async def auto_schedule_sessions():
+    global last_posted_session
     now = datetime.now(EST)
     channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
     if not channel:
         return
 
-    window_start = now - timedelta(seconds=60)
-    window_end = now + timedelta(seconds=60)
+    # Tightened to ±30s so consecutive 1-min ticks never overlap
+    window_start = now - timedelta(seconds=30)
+    window_end = now + timedelta(seconds=30)
 
-    monday_session_dt = next_run_time(20, 0)
-    sunday_post_dt = monday_session_dt - timedelta(hours=12)
-    if window_start <= sunday_post_dt <= window_end:
-        await create_schedule(channel, "Monday 8PM EST Session", session_dt=monday_session_dt)
-        return
+    sessions = [
+        ("Monday 8PM EST Session", next_run_time(20, 0), 12),
+        ("Tuesday 8PM EST Session", next_run_time(20, 1), 20),
+        ("Wednesday 8PM EST Session", next_run_time(20, 2), 20),
+    ]
 
-    tuesday_session_dt = next_run_time(20, 1)
-    monday_post_dt = tuesday_session_dt - timedelta(hours=20)
-    if window_start <= monday_post_dt <= window_end:
-        await create_schedule(channel, "Tuesday 8PM EST Session", session_dt=tuesday_session_dt)
-        return
-
-    wednesday_session_dt = next_run_time(20, 2)
-    tuesday_post_dt = wednesday_session_dt - timedelta(hours=20)
-    if window_start <= tuesday_post_dt <= window_end:
-        await create_schedule(channel, "Wednesday 8PM EST Session", session_dt=wednesday_session_dt)
-        return
+    for name, session_dt, hours_before in sessions:
+        post_dt = session_dt - timedelta(hours=hours_before)
+        if window_start <= post_dt <= window_end:
+            # Deduplicate: don't re-post the same session
+            session_key = f"{name}_{session_dt.isoformat()}"
+            if last_posted_session == session_key:
+                print(f"⏩ Skipping duplicate post for: {name}")
+                return
+            await create_schedule(channel, name, session_dt=session_dt)
+            last_posted_session = session_key
+            save_state()
+            return
 
 # ----------------------------
 # Bot ready
@@ -498,8 +504,9 @@ async def on_ready():
     schedule_view = ScheduleView()
     bot.add_view(schedule_view)
     
-    # Start auto scheduler
-    auto_schedule_sessions.start()
+    # Start auto scheduler (guard against duplicate starts on reconnect)
+    if not auto_schedule_sessions.is_running():
+        auto_schedule_sessions.start()
     
     print("✅ Bot is ready!")
 
