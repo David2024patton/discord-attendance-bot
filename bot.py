@@ -327,6 +327,10 @@ async def sync_users_from_ids():
 
     print(f"✅ Synced users: {len(attending)} attending, {len(standby)} standby, {len(not_attending)} not attending")
 
+    # Keep ID lists in sync after member resolution
+    # (if any member couldn't be fetched, attending_ids must reflect the reduced list)
+    sync_ids_from_users()
+
 def sync_ids_from_users():
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
 
@@ -575,8 +579,17 @@ class ScheduleView(discord.ui.View):
             await interaction.response.send_message("You're already attending!", ephemeral=True)
             return
         if user in standby:
-            await interaction.response.send_message("You're already on standby!", ephemeral=True)
-            return
+            # Allow standby users to move to attending if there's room
+            if len(attending) < MAX_ATTENDING and pending_offer is None:
+                standby.remove(user)
+                attending.append(user)
+                sync_ids_from_users()
+                await interaction.response.send_message("✅ Moved from standby to attending!", ephemeral=True)
+                await self.update_embed()
+                return
+            else:
+                await interaction.response.send_message("You're on standby — attending is full right now.", ephemeral=True)
+                return
         if user in not_attending:
             not_attending.remove(user)
 
