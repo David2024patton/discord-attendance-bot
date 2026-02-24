@@ -29,7 +29,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # ----------------------------
 ADMIN_ID = 740522966474948638
 DEFAULT_MAX_ATTENDING = 10
-MAX_STANDBY = 5
 NOSHOW_THRESHOLD = 3  # auto-standby after this many no-shows
 
 ALLOWED_GUILDS = [1370907857830746194, 1475253514111291594]
@@ -355,7 +354,7 @@ def build_embed():
     not_attend_text = "\n".join(f"{user.mention} ❌" for user in not_attending) or "None"
 
     embed.add_field(name=f"Attending ({len(attending)}/{MAX_ATTENDING})", value=attend_text, inline=False)
-    embed.add_field(name=f"Standby ({len(standby)}/{MAX_STANDBY})", value=standby_text, inline=False)
+    embed.add_field(name=f"Standby ({len(standby)})", value=standby_text, inline=False)
     embed.add_field(name="Not Attending", value=not_attend_text, inline=False)
 
     # No-show warning footer
@@ -561,26 +560,19 @@ class ScheduleView(discord.ui.View):
 
         # No-show penalty: auto-standby if too many no-shows
         if is_auto_standby(user.id):
-            if len(standby) < MAX_STANDBY:
-                standby.append(user)
-                sync_ids_from_users()
-                await interaction.response.send_message(
-                    f"⚠️ Due to {NOSHOW_THRESHOLD}+ no-shows, you've been placed on **standby**. Check in to improve your standing!",
-                    ephemeral=True
-                )
-                await self.update_embed()
-            else:
-                await interaction.response.send_message("Standby is full.", ephemeral=True)
+            standby.append(user)
+            sync_ids_from_users()
+            await interaction.response.send_message(
+                f"⚠️ Due to {NOSHOW_THRESHOLD}+ no-shows, you've been placed on **standby**. Check in to improve your standing!",
+                ephemeral=True
+            )
+            await self.update_embed()
             return
 
         if len(attending) < MAX_ATTENDING and pending_offer is None:
             attending.append(user)
         else:
-            if len(standby) < MAX_STANDBY:
-                standby.append(user)
-            else:
-                await interaction.response.send_message("Event and Standby are full.", ephemeral=True)
-                return
+            standby.append(user)
         sync_ids_from_users()
         await interaction.response.send_message("Updated your attendance.", ephemeral=True)
         await self.update_embed()
@@ -595,13 +587,10 @@ class ScheduleView(discord.ui.View):
             attending.remove(user)
         if user in not_attending:
             not_attending.remove(user)
-        if len(standby) < MAX_STANDBY:
-            standby.append(user)
-            sync_ids_from_users()
-            await interaction.response.send_message("Added to standby.", ephemeral=True)
-            await self.update_embed()
-        else:
-            await interaction.response.send_message("Standby list is full.", ephemeral=True)
+        standby.append(user)
+        sync_ids_from_users()
+        await interaction.response.send_message("Added to standby.", ephemeral=True)
+        await self.update_embed()
 
     @discord.ui.button(label="Not Attending", style=discord.ButtonStyle.danger, emoji="❌", custom_id="schedule_not_attend")
     async def not_attend(self, interaction: discord.Interaction, button: discord.ui.Button):
