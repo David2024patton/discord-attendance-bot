@@ -690,7 +690,11 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     embed.add_field(name="Not Attending", value="None", inline=False)
 
     schedule_view = ScheduleView()
-    event_message = await channel.send(content="@everyone", embed=embed, view=schedule_view)
+    try:
+        event_message = await channel.send(content="@everyone", embed=embed, view=schedule_view)
+    except discord.Forbidden:
+        # Fallback if bot can't mention @everyone
+        event_message = await channel.send(embed=embed, view=schedule_view)
 
     # Save message info for persistence
     event_message_id = event_message.id
