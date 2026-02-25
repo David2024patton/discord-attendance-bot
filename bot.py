@@ -1037,8 +1037,8 @@ async def _run_countdown():
                         embed = build_embed()
                         embed.set_footer(text=f"⏰ Started {elapsed_str} · 🟢 Session has started!")
                         await event_message.edit(embed=embed, view=schedule_view)
-                    # Auto-end after 2 hours post-start
-                    if elapsed >= 7200:
+                    # Auto-end after 4 hours post-start
+                    if elapsed >= 14400:
                         await end_session()
                         return
             except discord.NotFound:
