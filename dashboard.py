@@ -521,6 +521,13 @@ async def settings_page(request):
     beta_roles = g.get("beta_role_names", lambda: [])()
     archive_ch = g.get("archive_channel_id", lambda: "")()
     schedule_ch = g.get("schedule_channel_id", lambda: "")()
+    status_ch = g.get("status_channel_id", lambda: None)()
+    start_msg = g.get("status_start_msg", lambda: "")()
+    stop_msg = g.get("status_stop_msg", lambda: "")()
+
+    import html as html_mod
+    start_msg_safe = html_mod.escape(start_msg or "", quote=True)
+    stop_msg_safe = html_mod.escape(stop_msg or "", quote=True)
 
     days_html = ""
     for d in session_days:
@@ -553,13 +560,16 @@ async def settings_page(request):
             </div>
             <div class="card">
                 <div class="card-header">Discord Channels</div>
-                <div class="setting-row">
-                    <div><div class="setting-label">Schedule Channel ID</div><div class="setting-desc">Channel where session posts appear</div></div>
-                    <input class="setting-input" type="text" id="scheduleCh" value="{schedule_ch}" style="width:180px;font-size:12px" readonly>
+                <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+                    <div><div class="setting-label">Schedule Channel</div><div class="setting-desc">Where session sign-up posts appear (read-only)</div></div>
+                    <input class="setting-input" type="text" value="{schedule_ch}" style="width:100%;font-size:12px;text-align:left" readonly>
                 </div>
-                <div class="setting-row">
-                    <div><div class="setting-label">Archive Channel ID</div><div class="setting-desc">Channel for session archives</div></div>
-                    <input class="setting-input" type="text" id="archiveCh" value="{archive_ch}" style="width:180px;font-size:12px">
+                <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+                    <div><div class="setting-label">Archive Channel</div><div class="setting-desc">Channel for session attendance archives</div></div>
+                    <div style="display:flex;gap:8px;width:100%">
+                        <select id="archiveGuild" class="setting-input" style="width:50%;text-align:left" onchange="filterChannels('archiveGuild','archiveCh')"><option>Loading...</option></select>
+                        <select id="archiveCh" class="setting-input" style="width:50%;text-align:left"><option>Loading...</option></select>
+                    </div>
                 </div>
                 <div style="margin-top:16px;text-align:right">
                     <button class="btn btn-primary" onclick="saveChannels()">Save Channels</button>
@@ -589,28 +599,130 @@ async def settings_page(request):
                 </div>
             </div>
         </div>
+        <div style="margin-top:16px">
+            <div class="card">
+                <div class="card-header">📢 Session Status Notifications</div>
+                <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
+                    Automatic messages posted when sessions start and stop. Use <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:12px">{{name}}</code> for the session name.
+                </p>
+                <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+                    <div><div class="setting-label">Status Channel</div><div class="setting-desc">Select guild, then the channel to post session status</div></div>
+                    <div style="display:flex;gap:8px;width:100%">
+                        <select id="statusGuild" class="setting-input" style="width:50%;text-align:left" onchange="filterChannels('statusGuild','statusCh')"><option>Loading...</option></select>
+                        <select id="statusCh" class="setting-input" style="width:50%;text-align:left"><option>Loading...</option></select>
+                    </div>
+                </div>
+                <div class="grid grid-2" style="margin-top:16px;gap:16px">
+                    <div>
+                        <div class="setting-label" style="margin-bottom:8px">🟢 Session Start Message</div>
+                        <input class="setting-input" type="text" id="startMsg" value="{start_msg_safe}" style="width:100%;text-align:left;margin-bottom:8px">
+                        <button class="btn btn-primary btn-sm" style="background:var(--green)" onclick="testStatusMsg('start')">🧪 Test Start</button>
+                    </div>
+                    <div>
+                        <div class="setting-label" style="margin-bottom:8px">🔴 Session Stop Message</div>
+                        <input class="setting-input" type="text" id="stopMsg" value="{stop_msg_safe}" style="width:100%;text-align:left;margin-bottom:8px">
+                        <button class="btn btn-primary btn-sm" style="background:var(--red)" onclick="testStatusMsg('stop')">🧪 Test Stop</button>
+                    </div>
+                </div>
+                <div style="margin-top:16px;text-align:right">
+                    <button class="btn btn-primary" onclick="saveStatus()">Save Status Settings</button>
+                </div>
+            </div>
+        </div>
     </div>
     <script>
+    let _allGuilds = [];
+    const _currentArchive = '{archive_ch}';
+    const _currentStatus = '{status_ch or ""}';
+
+    fetch('/api/channels').then(r => r.json()).then(d => {{
+        _allGuilds = d.guilds || [];
+        populateGuildDropdown('archiveGuild', 'archiveCh', _currentArchive);
+        populateGuildDropdown('statusGuild', 'statusCh', _currentStatus);
+    }});
+
+    function populateGuildDropdown(guildSelId, chSelId, currentChId) {{
+        const gSel = document.getElementById(guildSelId);
+        const cSel = document.getElementById(chSelId);
+        gSel.innerHTML = '';
+        if (_allGuilds.length === 0) {{
+            gSel.innerHTML = '<option value="">No guilds</option>';
+            cSel.innerHTML = '<option value="">No channels</option>';
+            return;
+        }}
+        let selectedGuildId = _allGuilds[0].id;
+        if (currentChId) {{
+            for (const g of _allGuilds) {{
+                for (const ch of g.channels) {{
+                    if (ch.id === String(currentChId)) {{ selectedGuildId = g.id; break; }}
+                }}
+            }}
+        }}
+        _allGuilds.forEach(g => {{
+            const opt = document.createElement('option');
+            opt.value = g.id;
+            opt.textContent = g.name;
+            if (g.id === selectedGuildId) opt.selected = true;
+            gSel.appendChild(opt);
+        }});
+        filterChannels(guildSelId, chSelId, currentChId);
+    }}
+
+    function filterChannels(guildSelId, chSelId, preselect) {{
+        const guildId = document.getElementById(guildSelId).value;
+        const cSel = document.getElementById(chSelId);
+        cSel.innerHTML = '';
+        const guild = _allGuilds.find(g => g.id === guildId);
+        if (!guild) return;
+        if (chSelId === 'statusCh') {{
+            const n = document.createElement('option');
+            n.value = ''; n.textContent = '— None (disabled) —';
+            cSel.appendChild(n);
+        }}
+        guild.channels.forEach(ch => {{
+            const opt = document.createElement('option');
+            opt.value = ch.id;
+            opt.textContent = ch.name;
+            if (preselect && ch.id === String(preselect)) opt.selected = true;
+            cSel.appendChild(opt);
+        }});
+    }}
+
     function saveSettings() {{
-        const data = {{
+        _post('/api/settings', {{
             max_attending: parseInt(document.getElementById('maxAttending').value),
             checkin_grace: parseInt(document.getElementById('graceMinutes').value),
             noshow_threshold: parseInt(document.getElementById('noshowThreshold').value)
-        }};
-        _post('/api/settings', data, 'Session settings saved!');
+        }}, 'Session settings saved!');
     }}
     function saveChannels() {{
-        const data = {{
-            archive_channel_id: document.getElementById('archiveCh').value
-        }};
-        _post('/api/settings', data, 'Channel settings saved!');
+        _post('/api/settings', {{ archive_channel_id: document.getElementById('archiveCh').value }}, 'Channel settings saved!');
     }}
     function saveRoles() {{
-        const data = {{
+        _post('/api/settings', {{
             admin_role_names: document.getElementById('adminRoles').value.split(',').map(s=>s.trim()).filter(Boolean),
             beta_role_names: document.getElementById('betaRoles').value.split(',').map(s=>s.trim()).filter(Boolean)
-        }};
-        _post('/api/settings', data, 'Role settings saved!');
+        }}, 'Role settings saved!');
+    }}
+    function saveStatus() {{
+        _post('/api/settings', {{
+            status_channel_id: document.getElementById('statusCh').value,
+            status_start_msg: document.getElementById('startMsg').value,
+            status_stop_msg: document.getElementById('stopMsg').value
+        }}, 'Status settings saved!');
+    }}
+    function testStatusMsg(type) {{
+        const chId = document.getElementById('statusCh').value;
+        if (!chId) {{ alert('Select a status channel first'); return; }}
+        const msg = type === 'start' ? document.getElementById('startMsg').value : document.getElementById('stopMsg').value;
+        fetch('/api/test-status-msg', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{ channel_id: chId, type: type, message: msg }})
+        }}).then(r => r.json()).then(d => {{
+            if (d.ok) {{ _toast('Test ' + type + ' message sent!'); }}
+            else {{ alert(d.error || 'Failed'); }}
+        }});
     }}
     function _post(url, data, msg) {{
         fetch(url, {{
@@ -618,17 +730,22 @@ async def settings_page(request):
             headers: {{'Content-Type': 'application/json'}},
             body: JSON.stringify(data)
         }}).then(r => r.json()).then(d => {{
-            if (d.ok) {{
-                const t = document.getElementById('toast');
-                t.textContent = msg;
-                t.classList.add('show');
-                setTimeout(() => t.classList.remove('show'), 3000);
-            }} else {{ alert(d.error || 'Failed'); }}
+            if (d.ok) {{ _toast(msg); }}
+            else {{ alert(d.error || 'Failed'); }}
         }});
+    }}
+    function _toast(msg) {{
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3000);
     }}
     </script>"""
 
     return web.Response(text=_page("Settings", content, "settings"), content_type="text/html")
+
+
+
 
 # ── Calendar Page ────────────────────────────────────────────────
 CALENDAR_CSS = """
@@ -827,7 +944,10 @@ async def calendar_page(request):
             </div>
             <div id="sendToChannelSection" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
                 <label>Send Update To Channel</label>
-                <select id="channelSelect" style="margin-bottom:8px"><option value="">Loading channels...</option></select>
+                <div style="display:flex;gap:8px;margin-bottom:8px">
+                    <select id="channelGuildSelect" style="flex:1" onchange="filterCalChannels()"><option value="">Loading guilds...</option></select>
+                    <select id="channelSelect" style="flex:1"><option value="">Loading channels...</option></select>
+                </div>
                 <label>Message / Note (optional)</label>
                 <input type="text" id="channelMessage" placeholder="e.g. Date changed to Thursday">
                 <button class="btn btn-primary" style="width:100%;margin-top:8px;background:#43b581" onclick="sendToChannel()">Send to Channel</button>
@@ -1154,20 +1274,38 @@ async def calendar_page(request):
         document.getElementById('scheduleModal').classList.add('active');
     }
 
+    let _calGuilds = [];
     function loadChannels() {
         fetch('/api/channels').then(function(r) { return r.json(); }).then(function(d) {
-            const sel = document.getElementById('channelSelect');
-            sel.innerHTML = '';
-            if (d.channels && d.channels.length > 0) {
-                d.channels.forEach(function(ch) {
-                    const opt = document.createElement('option');
-                    opt.value = ch.id;
-                    opt.textContent = ch.name + ' (' + ch.guild + ')';
-                    sel.appendChild(opt);
-                });
-            } else {
-                sel.innerHTML = '<option value="">No channels available</option>';
+            _calGuilds = d.guilds || [];
+            const gSel = document.getElementById('channelGuildSelect');
+            gSel.innerHTML = '';
+            if (_calGuilds.length === 0) {
+                gSel.innerHTML = '<option value="">No guilds</option>';
+                document.getElementById('channelSelect').innerHTML = '<option value="">No channels</option>';
+                return;
             }
+            _calGuilds.forEach(function(g) {
+                var opt = document.createElement('option');
+                opt.value = g.id;
+                opt.textContent = g.name;
+                gSel.appendChild(opt);
+            });
+            filterCalChannels();
+        });
+    }
+
+    function filterCalChannels() {
+        var guildId = document.getElementById('channelGuildSelect').value;
+        var cSel = document.getElementById('channelSelect');
+        cSel.innerHTML = '';
+        var guild = _calGuilds.find(function(g) { return g.id === guildId; });
+        if (!guild) return;
+        guild.channels.forEach(function(ch) {
+            var opt = document.createElement('option');
+            opt.value = ch.id;
+            opt.textContent = ch.name;
+            cSel.appendChild(opt);
         });
     }
 
@@ -1440,20 +1578,30 @@ async def api_remove_session_day(request):
 
 @routes.get("/api/channels")
 async def api_channels(request):
-    """Return list of text channels the bot can see."""
+    """Return list of text channels grouped by guild for cascading dropdowns."""
     if not _check_auth(request):
         return web.json_response({"error": "unauthorized"}, status=401)
 
     channels = []
+    guilds = []
     if bot_ref:
         for guild in bot_ref.guilds:
+            guild_channels = []
             for ch in guild.text_channels:
-                channels.append({
+                entry = {
                     "id": str(ch.id),
                     "name": f"#{ch.name}",
                     "guild": guild.name,
-                })
-    return web.json_response({"channels": channels})
+                    "guild_id": str(guild.id),
+                }
+                channels.append(entry)
+                guild_channels.append(entry)
+            guilds.append({
+                "id": str(guild.id),
+                "name": guild.name,
+                "channels": guild_channels,
+            })
+    return web.json_response({"channels": channels, "guilds": guilds})
 
 @routes.post("/api/send-to-channel")
 async def api_send_to_channel(request):
@@ -1528,6 +1676,52 @@ async def api_send_to_channel(request):
         return web.json_response({"ok": True})
     except Exception as e:
         await push_log(f"❌ Send to channel error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+@routes.post("/api/test-status-msg")
+async def api_test_status_msg(request):
+    """Send a test start/stop message to a channel."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    try:
+        data = await request.json()
+        channel_id = data.get("channel_id")
+        msg_type = data.get("type", "start")  # "start" or "stop"
+        message = data.get("message", "")
+
+        if not channel_id:
+            return web.json_response({"error": "channel_id required"}, status=400)
+
+        import discord
+        channel = await bot_ref.fetch_channel(int(channel_id))
+
+        g = _state_getters
+        session_name_val = g.get("session_name", lambda: "Session")()
+
+        # Replace template variables
+        msg = message.replace("{name}", session_name_val or "Test Session")
+
+        if msg_type == "start":
+            embed = discord.Embed(
+                title="Session Started 🟢 (TEST)",
+                description=msg,
+                color=0x43b581
+            )
+            embed.set_footer(text="⚠️ This is a test message from the dashboard")
+        else:
+            embed = discord.Embed(
+                title="Session Ended 🔴 (TEST)",
+                description=msg,
+                color=0xe74c3c
+            )
+            embed.set_footer(text="⚠️ This is a test message from the dashboard")
+
+        await channel.send(embed=embed)
+        await push_log(f"🧪 Dashboard: Sent test {msg_type} message to #{channel.name}")
+        return web.json_response({"ok": True})
+    except Exception as e:
+        await push_log(f"❌ Test status message error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
 # ── Server Lifecycle ─────────────────────────────────────────────

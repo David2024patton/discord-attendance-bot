@@ -117,6 +117,7 @@ def load_state():
     global last_posted_session, MAX_ATTENDING, session_days, reminder_sent
     global checkin_active, checked_in_ids, checkin_message_id
     global admin_role_names, beta_role_names, archive_channel_id, session_ended
+    global status_channel_id, status_start_msg, status_stop_msg
 
     try:
         if os.path.exists(STATE_FILE):
@@ -147,6 +148,9 @@ def load_state():
                 beta_role_names = data.get('beta_role_names', ['Beta', 'Lead Beta'])
                 archive_channel_id = data.get('archive_channel_id', DEFAULT_ARCHIVE_CHANNEL_ID)
                 session_ended = data.get('session_ended', False)
+                status_channel_id = data.get('status_channel_id', None)
+                status_start_msg = data.get('status_start_msg', '🟢 **{name}** is now LIVE! Join us!')
+                status_stop_msg = data.get('status_stop_msg', '🔴 **{name}** has ended. See you next time!')
                 print(f"✅ Loaded state from {STATE_FILE}")
                 return True
     except Exception as e:
@@ -178,6 +182,9 @@ def load_state():
     beta_role_names = ['Beta', 'Lead Beta']
     archive_channel_id = DEFAULT_ARCHIVE_CHANNEL_ID
     session_ended = False
+    status_channel_id = None
+    status_start_msg = '🟢 **{name}** is now LIVE! Join us!'
+    status_stop_msg = '🔴 **{name}** has ended. See you next time!'
     return False
 
 def save_state():
@@ -203,6 +210,9 @@ def save_state():
         'beta_role_names': beta_role_names,
         'archive_channel_id': archive_channel_id,
         'session_ended': session_ended,
+        'status_channel_id': status_channel_id,
+        'status_start_msg': status_start_msg,
+        'status_stop_msg': status_stop_msg,
     }
     try:
         with open(STATE_FILE, 'w') as f:
@@ -426,6 +436,22 @@ async def end_session():
             print(f"❌ Could not update session embed: {e}")
 
     print("🔴 Session ended")
+
+    # Post to status channel if configured
+    if status_channel_id:
+        try:
+            status_ch = await bot.fetch_channel(status_channel_id)
+            msg = status_stop_msg.replace('{name}', session_name or 'Session')
+            stop_embed = discord.Embed(
+                title="Session Ended 🔴",
+                description=msg,
+                color=0xe74c3c
+            )
+            stop_embed.add_field(name="Attended", value=str(len(attending_ids)), inline=True)
+            stop_embed.add_field(name="Standby", value=str(len(standby_ids)), inline=True)
+            await status_ch.send(embed=stop_embed)
+        except Exception as e:
+            print(f"❌ Could not post session end to status channel: {e}")
 
 # Initialize state
 load_state()
@@ -1238,6 +1264,23 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     # Start live countdown timer if session has a future datetime
     if session_dt:
         countdown_task = asyncio.create_task(_run_countdown())
+
+    # Post to status channel if configured
+    if status_channel_id:
+        try:
+            status_ch = await bot.fetch_channel(status_channel_id)
+            msg = status_start_msg.replace('{name}', session_name_arg)
+            status_embed = discord.Embed(
+                title="Session Started 🟢",
+                description=msg,
+                color=0x43b581
+            )
+            if session_dt:
+                unix_ts = int(session_dt.timestamp())
+                status_embed.add_field(name="Time", value=f"<t:{unix_ts}:f>", inline=True)
+            await status_ch.send(embed=status_embed)
+        except Exception as e:
+            print(f"❌ Could not post to status channel: {e}")
 
 # ----------------------------
 # Live Countdown Timer
@@ -2059,6 +2102,7 @@ async def weekly_summary():
 def update_settings(data):
     global MAX_ATTENDING, CHECKIN_GRACE_MINUTES, NOSHOW_THRESHOLD
     global admin_role_names, beta_role_names, archive_channel_id, session_days
+    global status_channel_id, status_start_msg, status_stop_msg
     if "max_attending" in data:
         MAX_ATTENDING = int(data["max_attending"])
     if "checkin_grace" in data:
@@ -2073,6 +2117,13 @@ def update_settings(data):
         archive_channel_id = int(data["archive_channel_id"])
     if "session_days" in data:
         session_days = data["session_days"]
+    if "status_channel_id" in data:
+        val = data["status_channel_id"]
+        status_channel_id = int(val) if val else None
+    if "status_start_msg" in data:
+        status_start_msg = data["status_start_msg"]
+    if "status_stop_msg" in data:
+        status_stop_msg = data["status_stop_msg"]
     save_state()
 
 # ----------------------------
@@ -2125,6 +2176,9 @@ async def on_ready():
         "beta_role_names":    lambda: beta_role_names,
         "archive_channel_id": lambda: archive_channel_id,
         "schedule_channel_id": lambda: SCHEDULE_CHANNEL_ID,
+        "status_channel_id":   lambda: status_channel_id,
+        "status_start_msg":    lambda: status_start_msg,
+        "status_stop_msg":     lambda: status_stop_msg,
         "save_history":       save_history,
         "update_settings":    update_settings,
         "create_schedule":    create_schedule,
