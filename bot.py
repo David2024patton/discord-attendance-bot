@@ -689,7 +689,7 @@ class OfferView(discord.ui.View):
 # ----------------------------
 class CheckInView(discord.ui.View):
     """DM-based check-in button sent to each attending user individually."""
-    def __init__(self, user_id):
+    def __init__(self, user_id=None):
         super().__init__(timeout=None)
         self.target_user_id = user_id
 
