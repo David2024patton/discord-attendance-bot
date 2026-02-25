@@ -66,23 +66,42 @@ CSS = """
     --green: #43b581; --red: #f04747; --orange: #faa61a;
     --text: #dcddde; --text-dim: #96989d; --text-bright: #ffffff;
     --border: #3a3b3f; --radius: 8px;
+    --sidebar-w: 240px; --sidebar-collapsed: 60px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; min-height: 100vh; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; min-height: 100vh; display: flex; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* Nav */
-.nav { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; height: 56px; gap: 32px; position: sticky; top: 0; z-index: 100; }
-.nav-brand { font-size: 18px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 8px; }
-.nav-brand span { color: var(--accent); }
-.nav-links { display: flex; gap: 8px; flex: 1; }
-.nav-links a { padding: 8px 16px; border-radius: var(--radius); color: var(--text-dim); font-weight: 500; font-size: 14px; transition: all 0.15s; }
-.nav-links a:hover, .nav-links a.active { background: var(--bg3); color: var(--text-bright); text-decoration: none; }
-.nav-right { font-size: 13px; color: var(--text-dim); }
+/* Sidebar */
+.sidebar { width: var(--sidebar-w); min-height: 100vh; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 200; transition: width 0.25s ease; overflow: hidden; }
+.sidebar.collapsed { width: var(--sidebar-collapsed); }
+.sidebar-header { padding: 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); min-height: 56px; }
+.sidebar-brand { font-size: 17px; font-weight: 700; color: var(--text-bright); white-space: nowrap; overflow: hidden; }
+.sidebar-brand span { color: var(--accent); }
+.sidebar.collapsed .sidebar-brand { display: none; }
+.toggle-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 20px; padding: 4px 6px; border-radius: var(--radius); transition: all 0.15s; flex-shrink: 0; }
+.toggle-btn:hover { background: var(--bg3); color: var(--text-bright); }
+.sidebar-nav { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+.sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius); color: var(--text-dim); font-weight: 500; font-size: 14px; transition: all 0.15s; white-space: nowrap; overflow: hidden; text-decoration: none; }
+.sidebar-nav a:hover { background: var(--bg3); color: var(--text-bright); text-decoration: none; }
+.sidebar-nav a.active { background: rgba(88,101,242,0.15); color: var(--accent); }
+.sidebar-nav a .icon { font-size: 18px; min-width: 24px; text-align: center; flex-shrink: 0; }
+.sidebar-nav a .label { overflow: hidden; }
+.sidebar.collapsed .sidebar-nav a .label { display: none; }
+.sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+.sidebar-footer a { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--radius); color: var(--text-dim); font-size: 13px; transition: all 0.15s; text-decoration: none; }
+.sidebar-footer a:hover { background: var(--bg3); color: var(--red); text-decoration: none; }
+.sidebar-footer a .icon { font-size: 16px; min-width: 24px; text-align: center; flex-shrink: 0; }
+.sidebar.collapsed .sidebar-footer a .label { display: none; }
+
+/* Main content area */
+.main { margin-left: var(--sidebar-w); flex: 1; min-height: 100vh; transition: margin-left 0.25s ease; }
+.main.shifted { margin-left: var(--sidebar-collapsed); }
 
 /* Layout */
 .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+.page-title { font-size: 22px; font-weight: 700; color: var(--text-bright); margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .grid { display: grid; gap: 16px; }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
@@ -121,7 +140,7 @@ tr:hover td { background: var(--bg3); }
 .log-line.success { color: var(--green); }
 
 /* Login */
-.login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; width: 100%; }
 .login-box { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 40px; width: 360px; text-align: center; }
 .login-box h2 { margin-bottom: 24px; color: var(--text-bright); }
 .login-box input { width: 100%; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 14px; margin-bottom: 16px; outline: none; }
@@ -152,29 +171,54 @@ tr:hover td { background: var(--bg3); }
 .toast.show { transform: translateY(0); opacity: 1; }
 
 @media (max-width: 768px) {
+    .sidebar { width: var(--sidebar-collapsed); }
+    .sidebar .sidebar-brand { display: none; }
+    .sidebar .sidebar-nav a .label { display: none; }
+    .sidebar .sidebar-footer a .label { display: none; }
+    .main { margin-left: var(--sidebar-collapsed); }
     .grid-3, .grid-2 { grid-template-columns: 1fr; }
-    .nav { padding: 0 12px; gap: 12px; }
     .container { padding: 12px; }
 }
 """
 
+# ── Sidebar JS ───────────────────────────────────────────────────
+SIDEBAR_JS = """
+<script>
+const sidebar = document.getElementById('sidebar');
+const main = document.getElementById('main');
+const toggleBtn = document.getElementById('toggle-btn');
+function toggleSidebar() {
+    sidebar.classList.toggle('collapsed');
+    main.classList.toggle('shifted');
+    localStorage.setItem('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+}
+if (localStorage.getItem('sidebar-collapsed') === 'true') {
+    sidebar.classList.add('collapsed');
+    main.classList.add('shifted');
+}
+</script>
+"""
+
 # ── HTML Templates ───────────────────────────────────────────────
-def _nav(active="home"):
+def _sidebar(active="home"):
     def cls(page):
-        return ' class="active"' if page == active else ''
+        return ' active' if page == active else ''
     return f"""
-    <nav class="nav">
-        <div class="nav-brand">🎯 <span>Attendance</span> Admin</div>
-        <div class="nav-links">
-            <a href="/"{cls("home")}>Dashboard</a>
-            <a href="/users"{cls("users")}>Users</a>
-            <a href="/logs"{cls("logs")}>Logs</a>
-            <a href="/settings"{cls("settings")}>Settings</a>
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <button class="toggle-btn" id="toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
+            <div class="sidebar-brand">🎯 <span>Attendance</span></div>
         </div>
-        <div class="nav-right">
-            <a href="/logout" style="color:var(--text-dim)">Logout</a>
+        <nav class="sidebar-nav">
+            <a href="/" class="{cls('home')}"><span class="icon">📊</span><span class="label">Dashboard</span></a>
+            <a href="/users" class="{cls('users')}"><span class="icon">👥</span><span class="label">Users</span></a>
+            <a href="/logs" class="{cls('logs')}"><span class="icon">📋</span><span class="label">Logs</span></a>
+            <a href="/settings" class="{cls('settings')}"><span class="icon">⚙️</span><span class="label">Settings</span></a>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="/logout"><span class="icon">🚪</span><span class="label">Logout</span></a>
         </div>
-    </nav>"""
+    </aside>"""
 
 def _page(title, content, active="home"):
     return f"""<!DOCTYPE html>
@@ -183,9 +227,12 @@ def _page(title, content, active="home"):
 <title>{title} — Attendance Admin</title>
 <style>{CSS}</style>
 </head><body>
-{_nav(active)}
+{_sidebar(active)}
+<div class="main" id="main">
 {content}
+</div>
 <div class="toast" id="toast"></div>
+{SIDEBAR_JS}
 </body></html>"""
 
 LOGIN_PAGE = f"""<!DOCTYPE html>
