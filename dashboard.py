@@ -700,7 +700,7 @@ async def settings_page(request):
             <div class="card">
                 <div class="card-header">📢 Session Status Notifications</div>
                 <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
-                    Automatic messages posted when sessions start and stop. Use <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:12px">{{name}}</code> for the session name.
+                    Automatic messages posted when sessions start and stop. Pick a template below — the session name is filled in automatically.
                 </p>
                 <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:8px">
                     <div><div class="setting-label">Status Channel</div><div class="setting-desc">Select guild, then the channel to post session status</div></div>
@@ -712,12 +712,26 @@ async def settings_page(request):
                 <div class="grid grid-2" style="margin-top:16px;gap:16px">
                     <div>
                         <div class="setting-label" style="margin-bottom:8px">🟢 Session Start Message</div>
-                        <input class="setting-input" type="text" id="startMsg" value="{start_msg_safe}" style="width:100%;text-align:left;margin-bottom:8px">
+                        <select class="setting-input" id="startMsg" style="width:100%;text-align:left;margin-bottom:6px" onchange="previewMsg('startMsg','startPreview')">
+                            <option value="🦕 {{name}} is starting! Get ready to stomp!">🦕 Get ready to stomp!</option>
+                            <option value="🟢 Session &quot;{{name}}&quot; is now live — jump in!">🟢 Session is now live</option>
+                            <option value="⚔️ {{name}} has begun! Time to hunt!">⚔️ Time to hunt!</option>
+                            <option value="📢 Session &quot;{{name}}&quot; is starting now">📢 Starting now</option>
+                            <option value="🌿 {{name}} — survival begins now!">🌿 Survival begins</option>
+                        </select>
+                        <div id="startPreview" style="font-size:11px;color:var(--green);padding:4px 8px;background:var(--bg3);border-radius:4px;margin-bottom:8px;min-height:20px"></div>
                         <button class="btn btn-primary btn-sm" style="background:var(--green)" onclick="testStatusMsg('start')">🧪 Test Start</button>
                     </div>
                     <div>
                         <div class="setting-label" style="margin-bottom:8px">🔴 Session Stop Message</div>
-                        <input class="setting-input" type="text" id="stopMsg" value="{stop_msg_safe}" style="width:100%;text-align:left;margin-bottom:8px">
+                        <select class="setting-input" id="stopMsg" style="width:100%;text-align:left;margin-bottom:6px" onchange="previewMsg('stopMsg','stopPreview')">
+                            <option value="🔴 {{name}} has ended. Thanks for playing!">🔴 Thanks for playing!</option>
+                            <option value="🦴 Session &quot;{{name}}&quot; is over — great hunt everyone!">🦴 Great hunt everyone!</option>
+                            <option value="📊 {{name}} ended — see you next session!">📊 See you next session!</option>
+                            <option value="🌙 {{name}} has concluded. Rest up, dinos!">🌙 Rest up, dinos!</option>
+                            <option value="🏁 Session &quot;{{name}}&quot; is finished">🏁 Session finished</option>
+                        </select>
+                        <div id="stopPreview" style="font-size:11px;color:var(--red);padding:4px 8px;background:var(--bg3);border-radius:4px;margin-bottom:8px;min-height:20px"></div>
                         <button class="btn btn-primary btn-sm" style="background:var(--red)" onclick="testStatusMsg('stop')">🧪 Test Stop</button>
                     </div>
                 </div>
@@ -865,6 +879,30 @@ async def settings_page(request):
             else {{ alert(d.error || 'Failed'); }}
         }});
     }}
+
+    // Live preview for message templates
+    function previewMsg(selId, previewId) {{
+        const val = document.getElementById(selId).value;
+        document.getElementById(previewId).textContent = 'Preview: ' + val.replace(/\{{name\}}/g, 'Monday Night Hunt');
+    }}
+
+    // Pre-select saved message templates on load
+    const _savedStart = '{start_msg_safe}';
+    const _savedStop = '{stop_msg_safe}';
+    function preselectOption(selId, savedVal) {{
+        if (!savedVal) return;
+        const sel = document.getElementById(selId);
+        for (let i = 0; i < sel.options.length; i++) {{
+            if (sel.options[i].value === savedVal) {{
+                sel.selectedIndex = i;
+                break;
+            }}
+        }}
+    }}
+    preselectOption('startMsg', _savedStart);
+    preselectOption('stopMsg', _savedStop);
+    previewMsg('startMsg', 'startPreview');
+    previewMsg('stopMsg', 'stopPreview');
     function _post(url, data, msg) {{
         fetch(url, {{
             method: 'POST',
