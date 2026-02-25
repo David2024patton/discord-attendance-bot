@@ -1,12 +1,23 @@
 import asyncio
+import builtins
 import io
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 import pytz
 import discord
 from discord.ext import commands, tasks
 from PIL import Image, ImageDraw, ImageFont
+import dashboard
+
+# ── Intercept print() for dashboard live logs ────────────────────
+_original_print = builtins.print
+def _captured_print(*args, **kwargs):
+    _original_print(*args, **kwargs)
+    msg = " ".join(str(a) for a in args)
+    dashboard.add_log(msg)
+builtins.print = _captured_print
 
 # ----------------------------
 # Fix asyncio for Python 3.14+
@@ -2042,6 +2053,18 @@ async def weekly_summary():
         print(f"❌ Weekly summary error: {e}")
 
 # ----------------------------
+# ----------------------------
+# Settings updater (for dashboard)
+# ----------------------------
+def update_settings(data):
+    global MAX_ATTENDING, CHECKIN_GRACE_MINUTES
+    if "max_attending" in data:
+        MAX_ATTENDING = int(data["max_attending"])
+    if "checkin_grace" in data:
+        CHECKIN_GRACE_MINUTES = int(data["checkin_grace"])
+    save_state()
+
+# ----------------------------
 # Bot ready
 # ----------------------------
 @bot.event
@@ -2071,6 +2094,28 @@ async def on_ready():
         checkin_manager.start()
     if not weekly_summary.is_running():
         weekly_summary.start()
+
+    # ── Start Admin Dashboard ────────────────────────────────────
+    dashboard.register_state_getters({
+        "session_name":       lambda: session_name,
+        "session_dt_str":     lambda: session_dt_str,
+        "session_ended":      lambda: session_ended,
+        "attending_ids":      lambda: attending_ids,
+        "standby_ids":        lambda: standby_ids,
+        "not_attending_ids":  lambda: not_attending_ids,
+        "checked_in_ids":     lambda: checked_in_ids,
+        "checkin_active":     lambda: checkin_active,
+        "attendance_history": lambda: attendance_history,
+        "max_attending":      lambda: MAX_ATTENDING,
+        "noshow_threshold":   lambda: NOSHOW_THRESHOLD,
+        "checkin_grace":      lambda: CHECKIN_GRACE_MINUTES,
+        "session_days":       lambda: session_days,
+        "admin_role_names":   lambda: admin_role_names,
+        "beta_role_names":    lambda: beta_role_names,
+        "save_history":       save_history,
+        "update_settings":    update_settings,
+    })
+    await dashboard.start_dashboard(bot)
 
     print("✅ Bot is ready!")
     print(f"   Admin: {ADMIN_ID}")

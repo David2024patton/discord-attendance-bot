@@ -7,6 +7,9 @@ services:
     restart: unless-stopped
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Wildcats@4113}
+    ports:
+      - "8080:8080"
     volumes:
       - bot-data:/app/data
     labels:
