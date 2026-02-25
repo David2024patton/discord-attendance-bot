@@ -573,12 +573,13 @@ def build_embed():
 
     embed = discord.Embed(title=title, color=color)
 
-    # Attending list with streak badges
+    # Attending list with streak badges and check-in status
     if attending:
-        attend_text = "\n".join(
-            f"`{i+1}.` {user.mention}{streak_badge(user.id)}"
-            for i, user in enumerate(attending)
-        )
+        attend_lines = []
+        for i, user in enumerate(attending):
+            checkin_mark = " ✅" if user.id in checked_in_ids else ""
+            attend_lines.append(f"`{i+1}.` {user.mention}{checkin_mark}{streak_badge(user.id)}")
+        attend_text = "\n".join(attend_lines)
     else:
         attend_text = "*No one yet — be the first!*"
 
@@ -712,6 +713,9 @@ class CheckInView(discord.ui.View):
             content="✅ **You're checked in!** See you in the session.",
             view=self
         )
+        # Refresh the session embed to show the checkmark
+        if schedule_view:
+            await schedule_view.update_embed()
 
 # ----------------------------
 # Swap View (DM)
