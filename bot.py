@@ -1,10 +1,12 @@
 import asyncio
+import io
 import json
 import os
 from datetime import datetime, timedelta
 import pytz
 import discord
 from discord.ext import commands, tasks
+from PIL import Image, ImageDraw, ImageFont
 
 # ----------------------------
 # Fix asyncio for Python 3.14+
@@ -762,6 +764,122 @@ class ReminderView(discord.ui.View):
             await schedule_view.update_embed()
 
 # ----------------------------
+# Leaderboard Image Renderer
+# ----------------------------
+def _render_leaderboard_image(entries, clicker_id):
+    """Render a leaderboard table as a PNG image. Returns a BytesIO object."""
+    # --- Configuration ---
+    BG_COLOR = (30, 33, 36)         # Discord dark bg
+    HEADER_COLOR = (88, 101, 242)   # Blurple header
+    ROW_EVEN = (44, 47, 51)         # Dark row
+    ROW_ODD = (54, 57, 63)          # Slightly lighter row
+    HIGHLIGHT_ROW = (32, 58, 107)   # Blue highlight for clicker
+    TEXT_COLOR = (255, 255, 255)     # White text
+    DIM_TEXT = (185, 187, 190)      # Dimmer text
+    GOLD = (255, 215, 0)
+    SILVER = (192, 192, 192)
+    BRONZE = (205, 127, 50)
+    MEDAL_COLORS = [GOLD, SILVER, BRONZE]
+
+    # Try to load a nice font; fall back to default
+    font_size = 16
+    header_font_size = 14
+    title_font_size = 22
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+        header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", header_font_size)
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", title_font_size)
+    except OSError:
+        font = ImageFont.load_default()
+        font_bold = font
+        header_font = font
+        title_font = font
+
+    # --- Column layout ---
+    col_widths = [60, 200, 80, 80, 70, 70]  # Rank, Name, Attended, No-Show, Rate, Streak
+    col_headers = ["#", "Name", "Attend", "No-Show", "Rate", "Streak"]
+    row_height = 32
+    padding = 12
+    title_height = 45
+    header_height = 30
+    table_width = sum(col_widths) + padding * 2
+    table_height = title_height + header_height + row_height * len(entries) + padding
+
+    img = Image.new("RGB", (table_width, table_height), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    # --- Title ---
+    draw.text((padding, 10), "📊  Attendance Leaderboard", fill=TEXT_COLOR, font=title_font)
+
+    # --- Column headers ---
+    y = title_height
+    draw.rectangle([(0, y), (table_width, y + header_height)], fill=HEADER_COLOR)
+    x = padding
+    for i, header in enumerate(col_headers):
+        draw.text((x + 4, y + 7), header, fill=TEXT_COLOR, font=header_font)
+        x += col_widths[i]
+
+    # --- Data rows ---
+    y += header_height
+    medals = ["🥇", "🥈", "🥉"]
+    for idx, (uid_str, name, attended, no_shows, rate, streak) in enumerate(entries):
+        is_clicker = uid_str == clicker_id
+        if is_clicker:
+            row_color = HIGHLIGHT_ROW
+        elif idx % 2 == 0:
+            row_color = ROW_EVEN
+        else:
+            row_color = ROW_ODD
+
+        draw.rectangle([(0, y), (table_width, y + row_height)], fill=row_color)
+
+        x = padding
+        # Rank column
+        if idx < 3:
+            rank_text = medals[idx]
+            rank_color = MEDAL_COLORS[idx]
+        else:
+            rank_text = str(idx + 1)
+            rank_color = DIM_TEXT
+        draw.text((x + 4, y + 7), rank_text, fill=rank_color, font=font_bold)
+        x += col_widths[0]
+
+        # Name column
+        display_name = name[:18] + "…" if len(name) > 18 else name
+        if is_clicker:
+            display_name = "⭐ " + display_name
+        name_font = font_bold if is_clicker else font
+        draw.text((x + 4, y + 7), display_name, fill=TEXT_COLOR, font=name_font)
+        x += col_widths[1]
+
+        # Attended column
+        draw.text((x + 4, y + 7), str(attended), fill=(67, 181, 129), font=font)
+        x += col_widths[2]
+
+        # No-Show column
+        ns_color = (240, 71, 71) if no_shows > 0 else DIM_TEXT
+        draw.text((x + 4, y + 7), str(no_shows), fill=ns_color, font=font)
+        x += col_widths[3]
+
+        # Rate column
+        rate_color = (67, 181, 129) if rate >= 80 else ((255, 165, 0) if rate >= 50 else (240, 71, 71))
+        draw.text((x + 4, y + 7), f"{rate:.0f}%", fill=rate_color, font=font)
+        x += col_widths[4]
+
+        # Streak column
+        streak_text = f"🔥{streak}" if streak >= 3 else str(streak)
+        draw.text((x + 4, y + 7), streak_text, fill=(255, 165, 0) if streak >= 3 else DIM_TEXT, font=font)
+
+        y += row_height
+
+    # Export to bytes
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+# ----------------------------
 # Main Schedule View
 # ----------------------------
 class ScheduleView(discord.ui.View):
@@ -911,7 +1029,7 @@ class ScheduleView(discord.ui.View):
 
     @discord.ui.button(label="Leaderboard", style=discord.ButtonStyle.primary, emoji="📊", custom_id="schedule_leaderboard", row=1)
     async def leaderboard_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Post the attendance leaderboard in the channel (with 60s cooldown)."""
+        """Post the attendance leaderboard as an image in the channel (with 60s cooldown)."""
         global _leaderboard_cooldown
         now = datetime.now(EST)
         if _leaderboard_cooldown and (now - _leaderboard_cooldown).total_seconds() < 60:
@@ -926,7 +1044,7 @@ class ScheduleView(discord.ui.View):
             await interaction.response.send_message("📊 No attendance data yet.", ephemeral=True)
             return
 
-        # Build leaderboard
+        # Build leaderboard entries
         entries = []
         guild = interaction.guild
         clicker_id = str(interaction.user.id)
@@ -943,23 +1061,16 @@ class ScheduleView(discord.ui.View):
                 name = member.display_name if member else f"User {uid_str}"
             except:
                 name = f"User {uid_str}"
-            entries.append((uid_str, name, attended, total, rate, streak, no_shows))
+            entries.append((uid_str, name, attended, no_shows, rate, streak))
 
         entries.sort(key=lambda x: x[4], reverse=True)
-        medals = ["🥇", "🥈", "🥉"]
-        lines = []
-        for i, (uid_str, name, attended, total, rate, streak, no_shows) in enumerate(entries[:15]):
-            medal = medals[i] if i < 3 else f"{i+1}."
-            streak_str = f" 🔥{streak}" if streak >= 3 else ""
-            stats_str = f"✅{attended} Attended · ❌{no_shows} No-Show"
-            if uid_str == clicker_id:
-                lines.append(f"{medal} ⭐ __**{name}**__ — {stats_str} ({rate:.0f}%){streak_str}")
-            else:
-                lines.append(f"{medal} **{name}** — {stats_str} ({rate:.0f}%){streak_str}")
+        entries = entries[:15]  # top 15
 
-        embed = discord.Embed(title="📊 Attendance Leaderboard", description="\n".join(lines), color=0x3498db)
+        # Render the image
+        img_bytes = _render_leaderboard_image(entries, clicker_id)
+        file = discord.File(fp=img_bytes, filename="leaderboard.png")
         _leaderboard_cooldown = now
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(file=file)
 
 # ----------------------------
 # Create / Reset Session
