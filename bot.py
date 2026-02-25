@@ -1864,19 +1864,29 @@ async def checkin_manager():
             checkin_active = True
             dm_sent = 0
             dm_failed = []
+            print(f"📨 Sending check-in DMs to {len(attending_ids)} attending users...")
             for uid in list(attending_ids):
                 try:
                     user = await bot.fetch_user(uid)
+                    print(f"   📤 Sending DM to {user.display_name} ({uid})...")
+                    dm_channel = await user.create_dm()
                     view = CheckInView(uid)
-                    await user.send(
+                    await dm_channel.send(
                         f"🟢 **Session is starting!** You have **{CHECKIN_GRACE_MINUTES} minutes** to check in.\n"
                         f"Click the button below to confirm your attendance:",
                         view=view
                     )
                     dm_sent += 1
+                    print(f"   ✅ DM sent to {user.display_name} ({uid})")
+                except discord.Forbidden as e:
+                    dm_failed.append(uid)
+                    print(f"   ❌ FORBIDDEN: Cannot DM user {uid}: {e}")
+                except discord.HTTPException as e:
+                    dm_failed.append(uid)
+                    print(f"   ❌ HTTP ERROR: Cannot DM user {uid}: {e.status} {e.text}")
                 except Exception as e:
                     dm_failed.append(uid)
-                    print(f"❌ Could not DM user {uid}: {e}")
+                    print(f"   ❌ ERROR: Cannot DM user {uid}: {type(e).__name__}: {e}")
 
             # Post a brief notice in the channel
             channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
@@ -1887,7 +1897,7 @@ async def checkin_manager():
                     notice += f"\n⚠️ Could not DM: {failed_mentions} — they may have DMs disabled."
                 await channel.send(notice)
             save_state()
-            print(f"✅ Check-in DMs sent: {dm_sent} success, {len(dm_failed)} failed")
+            print(f"✅ Check-in DMs result: {dm_sent} success, {len(dm_failed)} failed")
 
         # After grace period: auto-relieve no-shows
         if CHECKIN_GRACE_MINUTES <= minutes_after <= CHECKIN_GRACE_MINUTES + 2 and checkin_active:
