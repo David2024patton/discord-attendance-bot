@@ -558,37 +558,68 @@ def build_embed():
         except:
             pass
 
-    embed = discord.Embed(title=title, color=0x2ecc71)
+    # Color changes based on session state
+    if session_ended:
+        color = 0xe74c3c  # red
+    elif session_has_started():
+        color = 0xf39c12  # orange/amber - in progress
+    else:
+        color = 0x2ecc71  # green - open
+
+    embed = discord.Embed(title=title, color=color)
 
     # Attending list with streak badges
     if attending:
         attend_text = "\n".join(
-            f"{i+1}. {user.mention} ✅{streak_badge(user.id)}"
+            f"`{i+1}.` {user.mention}{streak_badge(user.id)}"
             for i, user in enumerate(attending)
         )
     else:
-        attend_text = "None"
+        attend_text = "*No one yet — be the first!*"
 
     # Standby list
     if standby:
         standby_text = "\n".join(
-            f"{i+1}. {user.mention} ❓{streak_badge(user.id)}"
+            f"`{i+1}.` {user.mention}{streak_badge(user.id)}"
             for i, user in enumerate(standby)
         )
     else:
-        standby_text = "None"
+        standby_text = "*Empty*"
 
     # Not attending
-    not_attend_text = "\n".join(f"{user.mention} ❌" for user in not_attending) or "None"
+    if not_attending:
+        not_attend_text = "\n".join(f"{user.mention}" for user in not_attending)
+    else:
+        not_attend_text = "*None*"
 
-    embed.add_field(name=f"Attending ({len(attending)}/{MAX_ATTENDING})", value=attend_text, inline=False)
-    embed.add_field(name=f"Standby ({len(standby)})", value=standby_text, inline=False)
-    embed.add_field(name="Not Attending", value=not_attend_text, inline=False)
+    embed.add_field(
+        name=f"\u2800\n✅ Attending ({len(attending)}/{MAX_ATTENDING})",
+        value=attend_text + "\n\u2800",
+        inline=False
+    )
+    embed.add_field(
+        name=f"⏳ Standby ({len(standby)})",
+        value=standby_text + "\n\u2800",
+        inline=False
+    )
+    embed.add_field(
+        name=f"😞 Not Attending ({len(not_attending)})",
+        value=not_attend_text,
+        inline=False
+    )
 
-    # No-show warning footer
-    auto_standby_users = [u for u in attending if is_auto_standby(u.id)]
-    if auto_standby_users:
-        embed.set_footer(text="⚠️ Some users have high no-show counts")
+    # Status footer
+    if session_ended:
+        embed.set_footer(text="🔴 Session has ended")
+    elif session_has_started():
+        embed.set_footer(text="🟢 Session is live! Check-in enabled.")
+    else:
+        # No-show warning footer
+        auto_standby_users = [u for u in attending if is_auto_standby(u.id)]
+        if auto_standby_users:
+            embed.set_footer(text="⚠️ Some users have high no-show counts")
+        else:
+            embed.set_footer(text="Click a button below to sign up!")
 
     return embed
 
@@ -780,6 +811,9 @@ def _render_leaderboard_image(entries, clicker_id):
     SILVER = (192, 192, 192)
     BRONZE = (205, 127, 50)
     MEDAL_COLORS = [GOLD, SILVER, BRONZE]
+    GREEN = (67, 181, 129)
+    RED = (240, 71, 71)
+    ORANGE = (255, 165, 0)
 
     # Try to load a nice font; fall back to default
     font_size = 16
@@ -797,8 +831,8 @@ def _render_leaderboard_image(entries, clicker_id):
         title_font = font
 
     # --- Column layout ---
-    col_widths = [60, 200, 80, 80, 70, 70]  # Rank, Name, Attended, No-Show, Rate, Streak
-    col_headers = ["#", "Name", "Attend", "No-Show", "Rate", "Streak"]
+    col_widths = [55, 200, 80, 80, 65, 65]  # Rank, Name, Attended, No-Show, Rate, Streak
+    col_headers = ["Rank", "Name", "Attend", "No-Show", "Rate", "Streak"]
     row_height = 32
     padding = 12
     title_height = 45
@@ -809,8 +843,9 @@ def _render_leaderboard_image(entries, clicker_id):
     img = Image.new("RGB", (table_width, table_height), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    # --- Title ---
-    draw.text((padding, 10), "📊  Attendance Leaderboard", fill=TEXT_COLOR, font=title_font)
+    # --- Title bar with accent ---
+    draw.rectangle([(0, 0), (4, title_height)], fill=HEADER_COLOR)  # left accent bar
+    draw.text((padding + 6, 10), "Attendance Leaderboard", fill=TEXT_COLOR, font=title_font)
 
     # --- Column headers ---
     y = title_height
@@ -822,7 +857,7 @@ def _render_leaderboard_image(entries, clicker_id):
 
     # --- Data rows ---
     y += header_height
-    medals = ["🥇", "🥈", "🥉"]
+    medal_labels = ["#1", "#2", "#3"]
     for idx, (uid_str, name, attended, no_shows, rate, streak) in enumerate(entries):
         is_clicker = uid_str == clicker_id
         if is_clicker:
@@ -833,43 +868,50 @@ def _render_leaderboard_image(entries, clicker_id):
             row_color = ROW_ODD
 
         draw.rectangle([(0, y), (table_width, y + row_height)], fill=row_color)
+        # Left accent for clicker
+        if is_clicker:
+            draw.rectangle([(0, y), (4, y + row_height)], fill=GOLD)
 
         x = padding
         # Rank column
         if idx < 3:
-            rank_text = medals[idx]
+            rank_text = medal_labels[idx]
             rank_color = MEDAL_COLORS[idx]
         else:
-            rank_text = str(idx + 1)
+            rank_text = f"#{idx + 1}"
             rank_color = DIM_TEXT
         draw.text((x + 4, y + 7), rank_text, fill=rank_color, font=font_bold)
         x += col_widths[0]
 
         # Name column
-        display_name = name[:18] + "…" if len(name) > 18 else name
+        display_name = name[:18] + ".." if len(name) > 18 else name
         if is_clicker:
-            display_name = "⭐ " + display_name
+            display_name = ">>> " + display_name
         name_font = font_bold if is_clicker else font
-        draw.text((x + 4, y + 7), display_name, fill=TEXT_COLOR, font=name_font)
+        name_color = GOLD if is_clicker else TEXT_COLOR
+        draw.text((x + 4, y + 7), display_name, fill=name_color, font=name_font)
         x += col_widths[1]
 
         # Attended column
-        draw.text((x + 4, y + 7), str(attended), fill=(67, 181, 129), font=font)
+        draw.text((x + 4, y + 7), str(attended), fill=GREEN, font=font)
         x += col_widths[2]
 
         # No-Show column
-        ns_color = (240, 71, 71) if no_shows > 0 else DIM_TEXT
+        ns_color = RED if no_shows > 0 else DIM_TEXT
         draw.text((x + 4, y + 7), str(no_shows), fill=ns_color, font=font)
         x += col_widths[3]
 
         # Rate column
-        rate_color = (67, 181, 129) if rate >= 80 else ((255, 165, 0) if rate >= 50 else (240, 71, 71))
+        rate_color = GREEN if rate >= 80 else (ORANGE if rate >= 50 else RED)
         draw.text((x + 4, y + 7), f"{rate:.0f}%", fill=rate_color, font=font)
         x += col_widths[4]
 
         # Streak column
-        streak_text = f"🔥{streak}" if streak >= 3 else str(streak)
-        draw.text((x + 4, y + 7), streak_text, fill=(255, 165, 0) if streak >= 3 else DIM_TEXT, font=font)
+        if streak >= 3:
+            streak_text = f"x{streak}"
+            draw.text((x + 4, y + 7), streak_text, fill=ORANGE, font=font_bold)
+        else:
+            draw.text((x + 4, y + 7), str(streak), fill=DIM_TEXT, font=font)
 
         y += row_height
 
