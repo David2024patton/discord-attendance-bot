@@ -32,8 +32,9 @@ DEFAULT_MAX_ATTENDING = 10
 DEFAULT_NOSHOW_THRESHOLD = 3  # auto-standby after this many no-shows
 DEFAULT_CHECKIN_GRACE = 30  # minutes after session start before auto-relieve
 
-ALLOWED_GUILDS = [1370907857830746194, 1475253514111291594]
+ALLOWED_GUILDS = [1370907857830746194, 1370907957830746194, 1475253514111291594]
 SCHEDULE_CHANNEL_ID = 1370911001247223859
+DEFAULT_ARCHIVE_CHANNEL_ID = 1448185222842683456  # attendance-tracker channel
 EST = pytz.timezone("US/Eastern")
 
 # State file path - use /app/data/ for Docker volume persistence
@@ -46,13 +47,25 @@ HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 # Admin check
 # ----------------------------
 def is_admin(user):
-    """True if user is the hardcoded admin, has the 'Admin' role, or has server admin perms."""
+    """True if user is the hardcoded admin, has a configured admin role, or has server admin perms."""
     if user.id == ADMIN_ID:
         return True
     # Check Discord roles (works for Member objects, not User objects from DMs)
     if hasattr(user, 'roles'):
         for role in user.roles:
-            if role.name.lower() == 'admin' or role.permissions.administrator:
+            if role.permissions.administrator:
+                return True
+            if role.name.lower() in [r.lower() for r in admin_role_names]:
+                return True
+    return False
+
+def has_beta_role(user):
+    """True if user has the Beta or Lead Beta role."""
+    if is_admin(user):
+        return True  # admins can always schedule
+    if hasattr(user, 'roles'):
+        for role in user.roles:
+            if role.name.lower() in ['beta', 'lead beta']:
                 return True
     return False
 
@@ -64,7 +77,9 @@ async def check_admin(ctx):
     return False
 
 def session_has_started():
-    """Returns True if the session datetime has passed."""
+    """Returns True if the session datetime has passed and session has NOT ended."""
+    if session_ended:
+        return False  # session is over, not 'started'
     if not session_dt_str:
         return False
     try:
@@ -73,6 +88,10 @@ def session_has_started():
         return now >= session_dt
     except:
         return False
+
+def session_is_active():
+    """Returns True if the session exists and has NOT ended."""
+    return bool(session_dt_str) and not session_ended
 
 # ----------------------------
 # State Management
@@ -83,6 +102,7 @@ def load_state():
     global NOSHOW_THRESHOLD, CHECKIN_GRACE_MINUTES
     global last_posted_session, MAX_ATTENDING, session_days, reminder_sent
     global checkin_active, checked_in_ids, checkin_message_id
+    global admin_role_names, archive_channel_id, session_ended
 
     try:
         if os.path.exists(STATE_FILE):
@@ -109,6 +129,9 @@ def load_state():
                 checkin_message_id = data.get('checkin_message_id')
                 NOSHOW_THRESHOLD = data.get('noshow_threshold', DEFAULT_NOSHOW_THRESHOLD)
                 CHECKIN_GRACE_MINUTES = data.get('checkin_grace_minutes', DEFAULT_CHECKIN_GRACE)
+                admin_role_names = data.get('admin_role_names', ['Admin'])
+                archive_channel_id = data.get('archive_channel_id', DEFAULT_ARCHIVE_CHANNEL_ID)
+                session_ended = data.get('session_ended', False)
                 print(f"✅ Loaded state from {STATE_FILE}")
                 return True
     except Exception as e:
@@ -136,6 +159,9 @@ def load_state():
     checkin_message_id = None
     NOSHOW_THRESHOLD = DEFAULT_NOSHOW_THRESHOLD
     CHECKIN_GRACE_MINUTES = DEFAULT_CHECKIN_GRACE
+    admin_role_names = ['Admin']
+    archive_channel_id = DEFAULT_ARCHIVE_CHANNEL_ID
+    session_ended = False
     return False
 
 def save_state():
@@ -157,6 +183,9 @@ def save_state():
         'checkin_message_id': checkin_message_id,
         'noshow_threshold': NOSHOW_THRESHOLD,
         'checkin_grace_minutes': CHECKIN_GRACE_MINUTES,
+        'admin_role_names': admin_role_names,
+        'archive_channel_id': archive_channel_id,
+        'session_ended': session_ended,
     }
     try:
         with open(STATE_FILE, 'w') as f:
@@ -229,6 +258,153 @@ def streak_badge(user_id):
     elif s >= 3:
         return f" ⚡{s}"
     return ""
+
+# ----------------------------
+# Session Archiving
+# ----------------------------
+async def archive_session():
+    """Archives the current session's attendance data to the archive channel."""
+    if not session_name or not attending_ids and not standby_ids and not not_attending_ids:
+        return  # nothing to archive
+
+    try:
+        channel = await bot.fetch_channel(archive_channel_id)
+        if not channel:
+            print("❌ Archive channel not found")
+            return
+
+        now = datetime.now(EST)
+        date_str = now.strftime("%m/%d/%Y")
+
+        # Build archive embed
+        embed = discord.Embed(
+            title=f"📋 Session Archive — {date_str}",
+            description=f"**{session_name}**",
+            color=0x3498db,
+            timestamp=now
+        )
+
+        # Session time info
+        if session_dt_str:
+            try:
+                dt = datetime.fromisoformat(session_dt_str)
+                unix_ts = int(dt.timestamp())
+                embed.add_field(name="🕐 Session Time", value=f"<t:{unix_ts}:f>", inline=True)
+            except:
+                pass
+
+        # Attending list
+        if attending_ids:
+            attend_mentions = []
+            for uid in attending_ids:
+                badge = ""
+                if uid in checked_in_ids:
+                    badge = " ✅"
+                else:
+                    badge = " ❌ (no-show)"
+                attend_mentions.append(f"<@{uid}>{badge}")
+            embed.add_field(
+                name=f"👥 Attending ({len(attending_ids)})",
+                value="\n".join(attend_mentions) or "None",
+                inline=False
+            )
+        else:
+            embed.add_field(name="👥 Attending (0)", value="None", inline=False)
+
+        # Standby
+        if standby_ids:
+            standby_mentions = [f"<@{uid}> ❓" for uid in standby_ids]
+            embed.add_field(
+                name=f"⏳ Standby ({len(standby_ids)})",
+                value="\n".join(standby_mentions),
+                inline=False
+            )
+
+        # Not Attending
+        if not_attending_ids:
+            na_mentions = [f"<@{uid}>" for uid in not_attending_ids]
+            embed.add_field(
+                name=f"❌ Not Attending ({len(not_attending_ids)})",
+                value="\n".join(na_mentions),
+                inline=False
+            )
+
+        # Leaderboard section — top 5 by attendance rate
+        if attendance_history:
+            leaderboard_lines = []
+            entries = []
+            for uid_str, data in attendance_history.items():
+                total = data.get("total_signups", 0)
+                if total == 0:
+                    continue
+                attended = data.get("attended", 0)
+                no_shows = data.get("no_shows", 0)
+                streak = data.get("streak", 0)
+                rate = (attended / total) * 100
+                entries.append((uid_str, attended, total, rate, streak, no_shows))
+
+            entries.sort(key=lambda x: x[3], reverse=True)
+            medals = ["🥇", "🥈", "🥉"]
+            for i, (uid_str, attended, total, rate, streak, no_shows) in enumerate(entries[:5]):
+                medal = medals[i] if i < 3 else f"{i+1}."
+                streak_str = f" 🔥{streak}" if streak >= 3 else ""
+                noshow_str = f" ⚠️{no_shows}NS" if no_shows > 0 else ""
+                leaderboard_lines.append(
+                    f"{medal} <@{uid_str}> — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}"
+                )
+
+            if leaderboard_lines:
+                embed.add_field(
+                    name="📊 Leaderboard",
+                    value="\n".join(leaderboard_lines),
+                    inline=False
+                )
+
+        embed.set_footer(text="Session Ended")
+        await channel.send(embed=embed)
+        print(f"📋 Session archived to #{channel.name}")
+    except Exception as e:
+        print(f"❌ Archive error: {e}")
+
+async def end_session():
+    """Ends the current session: archives, posts offline message, disables buttons."""
+    global session_ended, countdown_task
+
+    session_ended = True
+    save_state()
+
+    # Cancel countdown timer
+    if countdown_task and not countdown_task.done():
+        countdown_task.cancel()
+        countdown_task = None
+
+    # Archive to the attendance tracker channel
+    await archive_session()
+
+    # Post "Session Offline" to archive channel
+    try:
+        archive_ch = await bot.fetch_channel(archive_channel_id)
+        if archive_ch:
+            offline_embed = discord.Embed(
+                title="Session Offline 🔴",
+                description="Thank you so much for a great session. We will see you next time!",
+                color=0xe74c3c
+            )
+            await archive_ch.send(embed=offline_embed)
+    except Exception as e:
+        print(f"❌ Could not post offline message: {e}")
+
+    # Update the session embed to show "Session has ended" and disable buttons
+    if event_message:
+        try:
+            embed = build_embed()
+            embed.set_footer(text="🔴 Session has ended")
+            # Send with no view (disables all buttons)
+            await event_message.edit(embed=embed, view=None)
+        except Exception as e:
+            print(f"❌ Could not update session embed: {e}")
+
+    print("🔴 Session ended")
 
 # Initialize state
 load_state()
@@ -595,8 +771,9 @@ class ScheduleView(discord.ui.View):
     @discord.ui.button(label="Attend", style=discord.ButtonStyle.success, emoji="✅", custom_id="schedule_attend")
     async def attend(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
-        if session_has_started():
-            await interaction.response.send_message("🔒 Session has already started — sign-ups are closed.", ephemeral=True)
+        if session_has_started() or session_ended:
+            msg = "🔴 Session has ended." if session_ended else "🔒 Session has already started — sign-ups are closed."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         if user in attending:
             await interaction.response.send_message("You're already attending!", ephemeral=True)
@@ -638,8 +815,9 @@ class ScheduleView(discord.ui.View):
     @discord.ui.button(label="Maybe / Standby", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="schedule_standby")
     async def join_standby(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
-        if session_has_started():
-            await interaction.response.send_message("🔒 Session has already started — sign-ups are closed.", ephemeral=True)
+        if session_has_started() or session_ended:
+            msg = "🔴 Session has ended." if session_ended else "🔒 Session has already started — sign-ups are closed."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         if user in standby:
             await interaction.response.send_message("You're already on standby!", ephemeral=True)
@@ -656,8 +834,9 @@ class ScheduleView(discord.ui.View):
     @discord.ui.button(label="Not Attending", style=discord.ButtonStyle.danger, emoji="❌", custom_id="schedule_not_attend")
     async def not_attend(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
-        if session_has_started():
-            await interaction.response.send_message("🔒 Session has already started — sign-ups are closed.", ephemeral=True)
+        if session_has_started() or session_ended:
+            msg = "🔴 Session has ended." if session_ended else "🔒 Session has already started — sign-ups are closed."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
         removed = False
         if user in attending:
@@ -677,6 +856,9 @@ class ScheduleView(discord.ui.View):
     @discord.ui.button(label="Relieve Spot", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="schedule_relieve")
     async def relieve_spot(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
+        if session_ended:
+            await interaction.response.send_message("🔴 Session has ended.", ephemeral=True)
+            return
         if user not in attending:
             await interaction.response.send_message("You are not in Attending.", ephemeral=True)
             return
@@ -690,6 +872,17 @@ class ScheduleView(discord.ui.View):
         )
         await self.update_embed()
 
+    @discord.ui.button(label="End Session", style=discord.ButtonStyle.danger, emoji="🔴", custom_id="schedule_end_session", row=1)
+    async def end_session_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Only admins can end a session.", ephemeral=True)
+            return
+        if session_ended:
+            await interaction.response.send_message("Session has already ended.", ephemeral=True)
+            return
+        await interaction.response.send_message("🔴 Ending session...", ephemeral=True)
+        await end_session()
+
 # ----------------------------
 # Create / Reset Session
 # ----------------------------
@@ -698,7 +891,14 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     global session_name, session_dt_str, event_message_id, event_channel_id
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
     global reminder_sent, checkin_active, checked_in_ids, checkin_message_id
-    global countdown_task
+    global countdown_task, session_ended
+
+    # Archive the previous session if there was one
+    if session_name and (attending_ids or standby_ids or not_attending_ids):
+        if not session_ended:
+            await end_session()
+        else:
+            await archive_session()
 
     # Cancel any running countdown timer
     if countdown_task and not countdown_task.done():
@@ -736,6 +936,7 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
     checkin_active = False
     checked_in_ids = []
     checkin_message_id = None
+    session_ended = False
 
     # Store session info
     session_name = session_name_arg
@@ -776,12 +977,15 @@ async def _run_countdown():
     """Edits the session embed with a live countdown, then elapsed time after start."""
     global event_message, session_dt_str
     started = False
+    session_online_posted = False
     try:
         while True:
             # Before start: update every 10s. After start: every 30s.
             await asyncio.sleep(10 if not started else 30)
             if not event_message or not session_dt_str:
                 return
+            if session_ended:
+                return  # session was ended by admin
             try:
                 session_dt = datetime.fromisoformat(session_dt_str)
                 now = datetime.now(session_dt.tzinfo or EST)
@@ -803,7 +1007,23 @@ async def _run_countdown():
                         await event_message.edit(embed=embed, view=schedule_view)
                 else:
                     # ── SESSION STARTED — show elapsed time ──
-                    started = True
+                    if not started:
+                        started = True
+                        # Post "Session Online" to archive channel (once)
+                        if not session_online_posted:
+                            session_online_posted = True
+                            try:
+                                archive_ch = await bot.fetch_channel(archive_channel_id)
+                                if archive_ch:
+                                    online_embed = discord.Embed(
+                                        title="Session Online 🟢",
+                                        description="Were live for OOTAH TIME!",
+                                        color=0x2ecc71
+                                    )
+                                    await archive_ch.send(embed=online_embed)
+                            except Exception as e:
+                                print(f"❌ Could not post online message: {e}")
+
                     elapsed = int(abs(remaining))
                     mins, secs = divmod(elapsed, 60)
                     hours, mins = divmod(mins, 60)
@@ -817,8 +1037,9 @@ async def _run_countdown():
                         embed = build_embed()
                         embed.set_footer(text=f"⏰ Started {elapsed_str} · 🟢 Session has started!")
                         await event_message.edit(embed=embed, view=schedule_view)
-                    # Stop updating after 2 hours post-start
+                    # Auto-end after 2 hours post-start
                     if elapsed >= 7200:
+                        await end_session()
                         return
             except discord.NotFound:
                 return  # message was deleted
@@ -830,9 +1051,38 @@ async def _run_countdown():
 # ----------------------------
 # Commands
 # ----------------------------
-@bot.command(help="Create a manual session sign-up in this channel.")
-async def schedule(ctx):
-    await create_schedule(ctx.channel, "Manual Session", session_dt=datetime.now(EST))
+@bot.command(help="Create a Beta Led session. Usage: !schedule beta led <hour> (e.g. !schedule beta led 20 for 8PM)")
+async def schedule(ctx, *args):
+    """Create a Beta Led Session. Role-gated to Beta and Lead Beta roles."""
+    if not has_beta_role(ctx.author):
+        await ctx.send("❌ Only users with the **Beta** or **Lead Beta** role can schedule sessions.", delete_after=10)
+        return
+
+    # Parse: !schedule beta led 20  or  !schedule 20  or  !schedule
+    hour = None
+    for arg in args:
+        try:
+            hour = int(arg)
+            break
+        except ValueError:
+            continue  # skip 'beta', 'led' etc.
+
+    if hour is None:
+        hour = 20  # default to 8 PM
+
+    if hour < 0 or hour > 23:
+        await ctx.send("❌ Hour must be 0–23 (24h format). Example: `!schedule beta led 20` for 8 PM.", delete_after=10)
+        return
+
+    # Build session datetime for today at the specified hour
+    now = datetime.now(EST)
+    session_dt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+
+    # If the time has already passed today, still create it (they might be late creating)
+    h12 = hour % 12 or 12
+    ampm = "PM" if hour >= 12 else "AM"
+    await create_schedule(ctx.channel, "Beta Led Session", session_dt=session_dt)
+    await ctx.send(f"✅ **Beta Led Session** scheduled for **{h12}{ampm} EST** today!", delete_after=10)
 
 @bot.command(help="Create a quick test session. Usage: !testsession [minutes] (default 1, admin only)")
 async def testsession(ctx, minutes: int = 1):
@@ -1016,13 +1266,55 @@ async def settings(ctx):
     if not await check_admin(ctx):
         return
     days_list = ", ".join(sd['name'] for sd in sorted(session_days, key=lambda x: x['weekday'])) or "None"
+    roles_list = ", ".join(admin_role_names) or "None"
+    status = "🔴 Ended" if session_ended else ("🟢 Active" if session_has_started() else ("⏳ Scheduled" if session_dt_str else "—"))
     embed = discord.Embed(title="⚙️ Bot Settings", color=0x95a5a6)
     embed.add_field(name="Max Attending", value=str(MAX_ATTENDING), inline=True)
     embed.add_field(name="Check-In Grace", value=f"{CHECKIN_GRACE_MINUTES} min", inline=True)
     embed.add_field(name="No-Show Threshold", value=f"{NOSHOW_THRESHOLD} (auto-standby)", inline=True)
     embed.add_field(name="Session Days", value=days_list, inline=False)
-    embed.add_field(name="Admin", value=f"<@{ADMIN_ID}>", inline=True)
+    embed.add_field(name="Admin Roles", value=roles_list, inline=True)
+    embed.add_field(name="Archive Channel", value=f"<#{archive_channel_id}>", inline=True)
+    embed.add_field(name="Session Status", value=status, inline=True)
+    embed.add_field(name="Owner Admin", value=f"<@{ADMIN_ID}>", inline=True)
     await ctx.send(embed=embed)
+
+@bot.command(help="Set admin roles. Admin only. Usage: !setadminroles Admin Moderator")
+async def setadminroles(ctx, *roles):
+    """Set which role names grant admin access. Usage: !setadminroles Admin Moderator"""
+    if not await check_admin(ctx):
+        return
+    global admin_role_names
+    if not roles:
+        await ctx.send(f"Current admin roles: **{', '.join(admin_role_names)}**\nUsage: `!setadminroles RoleName1 RoleName2`")
+        return
+    admin_role_names = list(roles)
+    save_state()
+    await ctx.send(f"✅ Admin roles set to: **{', '.join(admin_role_names)}**")
+
+@bot.command(help="Set the archive channel. Admin only. Usage: !setarchivechannel #channel")
+async def setarchivechannel(ctx, channel: discord.TextChannel):
+    """Set which channel session archives are posted to. Usage: !setarchivechannel #channel"""
+    if not await check_admin(ctx):
+        return
+    global archive_channel_id
+    archive_channel_id = channel.id
+    save_state()
+    await ctx.send(f"✅ Archive channel set to {channel.mention}")
+
+@bot.command(help="End the current session manually. Admin only.")
+async def endsession(ctx):
+    """End the current session, archive it, and post offline message."""
+    if not await check_admin(ctx):
+        return
+    if session_ended:
+        await ctx.send("❌ No active session to end.", delete_after=5)
+        return
+    if not session_dt_str:
+        await ctx.send("❌ No session is currently scheduled.", delete_after=5)
+        return
+    await ctx.send("🔴 Ending session...")
+    await end_session()
 
 # ----------------------------
 # Stats / Leaderboard
