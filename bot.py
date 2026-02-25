@@ -60,12 +60,12 @@ def is_admin(user):
     return False
 
 def has_beta_role(user):
-    """True if user has the Beta or Lead Beta role."""
+    """True if user has a configured beta scheduling role."""
     if is_admin(user):
         return True  # admins can always schedule
     if hasattr(user, 'roles'):
         for role in user.roles:
-            if role.name.lower() in ['beta', 'lead beta']:
+            if role.name.lower() in [r.lower() for r in beta_role_names]:
                 return True
     return False
 
@@ -102,7 +102,7 @@ def load_state():
     global NOSHOW_THRESHOLD, CHECKIN_GRACE_MINUTES
     global last_posted_session, MAX_ATTENDING, session_days, reminder_sent
     global checkin_active, checked_in_ids, checkin_message_id
-    global admin_role_names, archive_channel_id, session_ended
+    global admin_role_names, beta_role_names, archive_channel_id, session_ended
 
     try:
         if os.path.exists(STATE_FILE):
@@ -130,6 +130,7 @@ def load_state():
                 NOSHOW_THRESHOLD = data.get('noshow_threshold', DEFAULT_NOSHOW_THRESHOLD)
                 CHECKIN_GRACE_MINUTES = data.get('checkin_grace_minutes', DEFAULT_CHECKIN_GRACE)
                 admin_role_names = data.get('admin_role_names', ['Admin'])
+                beta_role_names = data.get('beta_role_names', ['Beta', 'Lead Beta'])
                 archive_channel_id = data.get('archive_channel_id', DEFAULT_ARCHIVE_CHANNEL_ID)
                 session_ended = data.get('session_ended', False)
                 print(f"✅ Loaded state from {STATE_FILE}")
@@ -160,6 +161,7 @@ def load_state():
     NOSHOW_THRESHOLD = DEFAULT_NOSHOW_THRESHOLD
     CHECKIN_GRACE_MINUTES = DEFAULT_CHECKIN_GRACE
     admin_role_names = ['Admin']
+    beta_role_names = ['Beta', 'Lead Beta']
     archive_channel_id = DEFAULT_ARCHIVE_CHANNEL_ID
     session_ended = False
     return False
@@ -184,6 +186,7 @@ def save_state():
         'noshow_threshold': NOSHOW_THRESHOLD,
         'checkin_grace_minutes': CHECKIN_GRACE_MINUTES,
         'admin_role_names': admin_role_names,
+        'beta_role_names': beta_role_names,
         'archive_channel_id': archive_channel_id,
         'session_ended': session_ended,
     }
@@ -1267,6 +1270,7 @@ async def settings(ctx):
         return
     days_list = ", ".join(sd['name'] for sd in sorted(session_days, key=lambda x: x['weekday'])) or "None"
     roles_list = ", ".join(admin_role_names) or "None"
+    beta_list = ", ".join(beta_role_names) or "None"
     status = "🔴 Ended" if session_ended else ("🟢 Active" if session_has_started() else ("⏳ Scheduled" if session_dt_str else "—"))
     embed = discord.Embed(title="⚙️ Bot Settings", color=0x95a5a6)
     embed.add_field(name="Max Attending", value=str(MAX_ATTENDING), inline=True)
@@ -1274,6 +1278,7 @@ async def settings(ctx):
     embed.add_field(name="No-Show Threshold", value=f"{NOSHOW_THRESHOLD} (auto-standby)", inline=True)
     embed.add_field(name="Session Days", value=days_list, inline=False)
     embed.add_field(name="Admin Roles", value=roles_list, inline=True)
+    embed.add_field(name="Beta Roles", value=beta_list, inline=True)
     embed.add_field(name="Archive Channel", value=f"<#{archive_channel_id}>", inline=True)
     embed.add_field(name="Session Status", value=status, inline=True)
     embed.add_field(name="Owner Admin", value=f"<@{ADMIN_ID}>", inline=True)
@@ -1291,6 +1296,19 @@ async def setadminroles(ctx, *roles):
     admin_role_names = list(roles)
     save_state()
     await ctx.send(f"✅ Admin roles set to: **{', '.join(admin_role_names)}**")
+
+@bot.command(help="Set beta scheduling roles. Admin only. Usage: !setbetaroles Beta 'Lead Beta'")
+async def setbetaroles(ctx, *roles):
+    """Set which role names can use !schedule. Usage: !setbetaroles Beta 'Lead Beta'"""
+    if not await check_admin(ctx):
+        return
+    global beta_role_names
+    if not roles:
+        await ctx.send(f"Current beta roles: **{', '.join(beta_role_names)}**\nUsage: `!setbetaroles RoleName1 RoleName2`")
+        return
+    beta_role_names = list(roles)
+    save_state()
+    await ctx.send(f"✅ Beta scheduling roles set to: **{', '.join(beta_role_names)}**")
 
 @bot.command(help="Set the archive channel. Admin only. Usage: !setarchivechannel #channel")
 async def setarchivechannel(ctx, channel: discord.TextChannel):
