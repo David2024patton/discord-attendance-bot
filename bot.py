@@ -875,7 +875,7 @@ class ScheduleView(discord.ui.View):
         )
         await self.update_embed()
 
-    @discord.ui.button(label="End Session", style=discord.ButtonStyle.danger, emoji="🔴", custom_id="schedule_end_session", row=1)
+    @discord.ui.button(label="End Session", style=discord.ButtonStyle.secondary, emoji="⬜", custom_id="schedule_end_session", row=1)
     async def end_session_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Only admins can end a session.", ephemeral=True)
@@ -885,6 +885,28 @@ class ScheduleView(discord.ui.View):
             return
         await interaction.response.send_message("🔴 Ending session...", ephemeral=True)
         await end_session()
+
+    @discord.ui.button(label="Menu", style=discord.ButtonStyle.secondary, emoji="📋", custom_id="schedule_menu", row=1)
+    async def menu_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Whisper the help menu to the user (true ephemeral)."""
+        user_is_admin = is_admin(interaction.user)
+        embed = _build_everyone_embed()
+        if user_is_admin:
+            embed.set_footer(text="Page 1 · Only you can see this")
+            # Build a combined view with admin page button
+            admin_embed = _build_admin_embed()
+            admin_embed.set_footer(text="Page 2 · Only you can see this")
+            # Send both pages in one ephemeral response
+            await interaction.response.send_message(
+                embeds=[embed, admin_embed],
+                ephemeral=True
+            )
+        else:
+            embed.set_footer(text="Only you can see this")
+            await interaction.response.send_message(
+                embed=embed,
+                ephemeral=True
+            )
 
 # ----------------------------
 # Create / Reset Session
@@ -1514,27 +1536,14 @@ class HelpView(discord.ui.View):
 
 @bot.command(help="Show this help menu.")
 async def help(ctx):
-    """Send a whisper-style help menu in the current channel (auto-deletes)."""
-    # Delete the !help message from the channel to keep it clean
+    """Points users to the Menu button on the session embed."""
     try:
         await ctx.message.delete()
     except Exception:
         pass
-
-    user_is_admin = is_admin(ctx.author)
-    view = HelpView(ctx.author.id, show_admin=user_is_admin)
-
-    # Set the right footer for the initial embed
-    embed = _build_everyone_embed()
-    if user_is_admin:
-        embed.set_footer(text="Page 1/2 · Only you can see this · Auto-deletes in 60s")
-    else:
-        embed.set_footer(text="Only you can see this · Auto-deletes in 60s")
-
-    # Send in-channel with auto-delete (whisper style)
     await ctx.send(
-        f"{ctx.author.mention}",
-        embed=embed, view=view, delete_after=60
+        f"{ctx.author.mention} Click the **📋 Menu** button on the session message to see help! Only you will see it.",
+        delete_after=10
     )
 
 # ----------------------------
