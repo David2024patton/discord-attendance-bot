@@ -421,6 +421,7 @@ pending_offer = None
 event_message = None
 schedule_view = None
 countdown_task = None  # asyncio.Task for live countdown
+_leaderboard_cooldown = None  # Cooldown for leaderboard button (60s)
 
 # ----------------------------
 # Helper: next run datetime
@@ -907,6 +908,54 @@ class ScheduleView(discord.ui.View):
                 embed=embed,
                 ephemeral=True
             )
+
+    @discord.ui.button(label="Leaderboard", style=discord.ButtonStyle.primary, emoji="📊", custom_id="schedule_leaderboard", row=1)
+    async def leaderboard_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Post the attendance leaderboard in the channel (with 60s cooldown)."""
+        global _leaderboard_cooldown
+        now = datetime.now(EST)
+        if _leaderboard_cooldown and (now - _leaderboard_cooldown).total_seconds() < 60:
+            remaining = 60 - int((now - _leaderboard_cooldown).total_seconds())
+            await interaction.response.send_message(
+                f"⏳ Leaderboard was just posted. Try again in **{remaining}s**.",
+                ephemeral=True
+            )
+            return
+
+        if not attendance_history:
+            await interaction.response.send_message("📊 No attendance data yet.", ephemeral=True)
+            return
+
+        # Build leaderboard
+        entries = []
+        guild = interaction.guild
+        for uid_str, data in attendance_history.items():
+            total = data.get("total_signups", 0)
+            if total == 0:
+                continue
+            attended = data.get("attended", 0)
+            no_shows = data.get("no_shows", 0)
+            streak = data.get("streak", 0)
+            rate = (attended / total) * 100
+            try:
+                member = guild.get_member(int(uid_str))
+                name = member.display_name if member else f"User {uid_str}"
+            except:
+                name = f"User {uid_str}"
+            entries.append((name, attended, total, rate, streak, no_shows))
+
+        entries.sort(key=lambda x: x[3], reverse=True)
+        medals = ["🥇", "🥈", "🥉"]
+        lines = []
+        for i, (name, attended, total, rate, streak, no_shows) in enumerate(entries[:15]):
+            medal = medals[i] if i < 3 else f"{i+1}."
+            streak_str = f" 🔥{streak}" if streak >= 3 else ""
+            noshow_str = f" ⚠️{no_shows}NS" if no_shows > 0 else ""
+            lines.append(f"{medal} **{name}** — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
+
+        embed = discord.Embed(title="📊 Attendance Leaderboard", description="\n".join(lines), color=0x3498db)
+        _leaderboard_cooldown = now
+        await interaction.response.send_message(embed=embed)
 
 # ----------------------------
 # Create / Reset Session
