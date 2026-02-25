@@ -929,6 +929,7 @@ class ScheduleView(discord.ui.View):
         # Build leaderboard
         entries = []
         guild = interaction.guild
+        clicker_id = str(interaction.user.id)
         for uid_str, data in attendance_history.items():
             total = data.get("total_signups", 0)
             if total == 0:
@@ -942,16 +943,19 @@ class ScheduleView(discord.ui.View):
                 name = member.display_name if member else f"User {uid_str}"
             except:
                 name = f"User {uid_str}"
-            entries.append((name, attended, total, rate, streak, no_shows))
+            entries.append((uid_str, name, attended, total, rate, streak, no_shows))
 
-        entries.sort(key=lambda x: x[3], reverse=True)
+        entries.sort(key=lambda x: x[4], reverse=True)
         medals = ["🥇", "🥈", "🥉"]
         lines = []
-        for i, (name, attended, total, rate, streak, no_shows) in enumerate(entries[:15]):
+        for i, (uid_str, name, attended, total, rate, streak, no_shows) in enumerate(entries[:15]):
             medal = medals[i] if i < 3 else f"{i+1}."
             streak_str = f" 🔥{streak}" if streak >= 3 else ""
             noshow_str = f" ⚠️{no_shows}NS" if no_shows > 0 else ""
-            lines.append(f"{medal} **{name}** — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
+            if uid_str == clicker_id:
+                lines.append(f"{medal} ⭐ __**{name}**__ — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
+            else:
+                lines.append(f"{medal} **{name}** — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
 
         embed = discord.Embed(title="📊 Attendance Leaderboard", description="\n".join(lines), color=0x3498db)
         _leaderboard_cooldown = now
