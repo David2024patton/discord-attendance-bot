@@ -633,39 +633,95 @@ async def settings_page(request):
 # ── Calendar Page ────────────────────────────────────────────────
 CALENDAR_CSS = """
 <style>
-.cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-.cal-header h3 { color:var(--text-bright); font-size:20px; }
-.cal-nav { display:flex; gap:8px; }
-.cal-nav button { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:6px 14px; border-radius:var(--radius); cursor:pointer; font-size:14px; }
-.cal-nav button:hover { background:var(--accent); color:white; }
-.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
-.cal-dow { text-align:center; font-size:11px; text-transform:uppercase; color:var(--text-dim); font-weight:600; padding:8px 0; }
-.cal-day { background:var(--bg2); border:1px solid var(--border); border-radius:4px; min-height:90px; padding:6px; cursor:pointer; transition:all 0.15s; position:relative; }
-.cal-day:hover { border-color:var(--accent); background:var(--bg3); }
-.cal-day.today { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
-.cal-day.other-month { opacity:0.3; }
-.cal-day .day-num { font-size:13px; font-weight:600; color:var(--text-bright); }
-.cal-day .day-events { margin-top:4px; }
-.cal-event { font-size:10px; padding:2px 4px; border-radius:3px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.cal-event.recurring { background:rgba(88,101,242,0.25); color:var(--accent); }
-.cal-event.oneoff { background:rgba(67,181,129,0.25); color:var(--green); }
+/* ── Google Calendar-Style Week View ───────────────────────── */
+.gcal-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
+.gcal-toolbar h2 { color:var(--text-bright); font-size:22px; font-weight:600; margin:0; }
+.gcal-nav { display:flex; gap:6px; align-items:center; }
+.gcal-nav button { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:7px 16px; border-radius:20px; cursor:pointer; font-size:13px; font-weight:500; transition:all 0.15s; }
+.gcal-nav button:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+.gcal-nav .today-btn { background:transparent; border:2px solid var(--accent); color:var(--accent); font-weight:600; }
+.gcal-nav .today-btn:hover { background:var(--accent); color:#fff; }
+.gcal-tz { font-size:12px; color:var(--text-dim); }
+
+/* Grid layout */
+.gcal-container { display:flex; gap:16px; }
+.gcal-main { flex:1; min-width:0; }
+.gcal-side { width:260px; flex-shrink:0; }
+
+/* Week grid */
+.week-grid { display:grid; grid-template-columns:70px repeat(7,1fr); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:var(--bg); }
+.week-header { display:contents; }
+.week-header .corner { background:var(--bg2); border-bottom:1px solid var(--border); border-right:1px solid var(--border); padding:8px; }
+.day-col-header { background:var(--bg2); border-bottom:1px solid var(--border); border-right:1px solid var(--border); text-align:center; padding:10px 4px; }
+.day-col-header:last-child { border-right:none; }
+.day-col-header .dow { font-size:11px; text-transform:uppercase; color:var(--text-dim); font-weight:600; letter-spacing:0.5px; }
+.day-col-header .day-num { font-size:22px; font-weight:600; color:var(--text-bright); margin-top:2px; line-height:1.2; }
+.day-col-header.is-today .day-num { background:var(--accent); color:white; border-radius:50%; width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; }
+
+/* Time rows */
+.time-row { display:contents; }
+.time-label { background:var(--bg2); border-right:1px solid var(--border); border-bottom:1px solid var(--border); padding:6px 8px; font-size:11px; color:var(--text-dim); text-align:right; font-weight:500; display:flex; align-items:flex-start; justify-content:flex-end; }
+.time-cell { border-right:1px solid var(--border); border-bottom:1px solid var(--border); min-height:80px; position:relative; cursor:pointer; transition:background 0.12s; }
+.time-cell:last-child { border-right:none; }
+.time-cell:hover { background:rgba(88,101,242,0.06); }
+
+/* Event blocks */
+.evt-block { position:absolute; left:2px; right:2px; border-radius:4px; padding:4px 6px; font-size:11px; cursor:pointer; z-index:10; overflow:hidden; transition:box-shadow 0.15s; border-left:3px solid; }
+.evt-block:hover { box-shadow:0 2px 8px rgba(0,0,0,0.3); z-index:20; }
+.evt-block.evt-recurring { background:rgba(88,101,242,0.2); border-color:var(--accent); color:var(--accent); }
+.evt-block.evt-active { background:rgba(67,181,129,0.2); border-color:var(--green); color:var(--green); }
+.evt-block.evt-ended { background:rgba(240,71,71,0.15); border-color:var(--red); color:var(--red); }
+.evt-block .evt-title { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.evt-block .evt-time { font-size:10px; opacity:0.8; }
+.evt-block .evt-attendees { font-size:10px; margin-top:2px; opacity:0.7; }
+
+/* Now line */
+.now-line { position:absolute; left:0; right:0; height:2px; background:var(--red); z-index:15; pointer-events:none; }
+.now-line::before { content:''; position:absolute; left:-4px; top:-4px; width:10px; height:10px; background:var(--red); border-radius:50%; }
+
 /* Modal */
-.modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:500; align-items:center; justify-content:center; }
+.modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:500; align-items:center; justify-content:center; }
 .modal-overlay.active { display:flex; }
-.modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:28px; width:420px; max-width:90vw; }
+.modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:24px 28px; width:480px; max-width:92vw; max-height:85vh; overflow-y:auto; }
 .modal h3 { color:var(--text-bright); margin-bottom:16px; font-size:18px; }
-.modal label { display:block; font-size:13px; color:var(--text-dim); margin-bottom:4px; margin-top:12px; }
-.modal input, .modal select { width:100%; padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:14px; }
-.modal input:focus, .modal select:focus { border-color:var(--accent); outline:none; }
+.modal label { display:block; font-size:12px; color:var(--text-dim); margin-bottom:4px; margin-top:14px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
+.modal input, .modal select { width:100%; padding:9px 12px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:14px; }
+.modal input:focus, .modal select:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 2px rgba(88,101,242,0.2); }
 .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
-.modal .btn-secondary { background:var(--bg3); color:var(--text); border:1px solid var(--border); padding:8px 16px; border-radius:var(--radius); cursor:pointer; font-size:13px; }
+.modal .btn-secondary { background:var(--bg3); color:var(--text); border:1px solid var(--border); padding:8px 18px; border-radius:var(--radius); cursor:pointer; font-size:13px; }
 .modal .btn-secondary:hover { background:var(--border); }
-/* Recurring day manager */
-.rec-day { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); }
-.rec-day:last-child { border-bottom:none; }
-.rec-day .rec-name { flex:1; font-weight:500; }
-.rec-day .rec-time { color:var(--accent); font-size:13px; }
-.rec-day .rec-post { color:var(--text-dim); font-size:12px; }
+.modal .btn-danger { background:var(--red); color:white; border:none; padding:8px 18px; border-radius:var(--radius); cursor:pointer; font-size:13px; }
+.modal .btn-danger:hover { opacity:0.85; }
+
+/* Attendee list in modal */
+.attendee-list { margin-top:8px; }
+.attendee-item { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px; }
+.attendee-item:last-child { border-bottom:none; }
+.attendee-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.attendee-dot.checked { background:var(--green); }
+.attendee-dot.pending { background:var(--orange); }
+
+/* Side panel recurring */
+.rec-item { display:flex; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--border); }
+.rec-item:last-child { border-bottom:none; }
+.rec-item .rec-color { width:10px; height:10px; border-radius:2px; background:var(--accent); flex-shrink:0; }
+.rec-item .rec-info { flex:1; }
+.rec-item .rec-name { font-size:13px; font-weight:500; color:var(--text-bright); }
+.rec-item .rec-detail { font-size:11px; color:var(--text-dim); }
+
+/* Mini month calendar */
+.mini-cal { margin-bottom:16px; }
+.mini-cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.mini-cal-header span { font-size:13px; font-weight:600; color:var(--text-bright); }
+.mini-cal-header button { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:2px 6px; }
+.mini-cal-header button:hover { color:var(--accent); }
+.mini-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:1px; text-align:center; }
+.mini-cal-grid .mc-dow { font-size:10px; color:var(--text-dim); padding:2px; font-weight:600; }
+.mini-cal-grid .mc-day { font-size:11px; color:var(--text); padding:4px 2px; border-radius:50%; cursor:pointer; }
+.mini-cal-grid .mc-day:hover { background:var(--bg3); }
+.mini-cal-grid .mc-day.mc-today { background:var(--accent); color:white; font-weight:600; }
+.mini-cal-grid .mc-day.mc-other { color:var(--text-dim); opacity:0.4; }
+.mini-cal-grid .mc-day.mc-selected { background:rgba(88,101,242,0.3); }
 </style>
 """
 
@@ -678,45 +734,86 @@ async def calendar_page(request):
     session_days = g.get("session_days", lambda: [])()
     session_days_json = json.dumps(session_days)
 
-    content = f"""
+    # Current session info
+    session_name = g.get("session_name", lambda: "")()
+    session_dt_str = g.get("session_dt_str", lambda: "")()
+    session_ended = g.get("session_ended", lambda: True)()
+    attending_ids = g.get("attending_ids", lambda: [])()
+    standby_ids = g.get("standby_ids", lambda: [])()
+    checked_in_ids = g.get("checked_in_ids", lambda: set())()
+
+    # Resolve attendee names
+    attendees = []
+    async def get_name(uid):
+        if bot_ref:
+            try:
+                u = await bot_ref.fetch_user(uid)
+                return u.display_name
+            except:
+                pass
+        return str(uid)
+
+    for uid in attending_ids:
+        name = await get_name(uid)
+        attendees.append({"id": uid, "name": name, "checked_in": uid in checked_in_ids, "status": "attending"})
+    for uid in standby_ids:
+        name = await get_name(uid)
+        attendees.append({"id": uid, "name": name, "checked_in": False, "status": "standby"})
+
+    current_session = {
+        "name": session_name or "",
+        "dt": session_dt_str or "",
+        "ended": session_ended,
+        "attendees": attendees,
+    }
+    current_session_json = json.dumps(current_session)
+
+    hour_options = ' '.join(f'<option value="{h}">{h:02d}</option>' for h in range(24))
+    hour_options_full = ' '.join(f'<option value="{h}">{h:02d}:00</option>' for h in range(24))
+
+    html_part = f"""
     {CALENDAR_CSS}
-    <div class="container">
-        <h2 class="page-title">📅 Session Calendar</h2>
-        <div class="grid grid-2" style="grid-template-columns:2fr 1fr">
-            <div class="card">
-                <div class="cal-header">
-                    <div class="cal-nav">
-                        <button onclick="changeMonth(-1)">◀</button>
-                        <button onclick="goToday()">Today</button>
-                        <button onclick="changeMonth(1)">▶</button>
-                    </div>
-                    <h3 id="cal-title"></h3>
-                </div>
-                <div class="cal-grid" id="cal-grid"></div>
+    <div class="container" style="max-width:1400px">
+        <div class="gcal-toolbar">
+            <div class="gcal-nav">
+                <button class="today-btn" onclick="goToday()">Today</button>
+                <button onclick="changeWeek(-1)">&#9664;</button>
+                <button onclick="changeWeek(1)">&#9654;</button>
+                <h2 id="week-title" style="margin-left:12px"></h2>
             </div>
-            <div class="card">
-                <div class="card-header">Recurring Session Days</div>
-                <div id="rec-days-list"></div>
-                <div style="margin-top:12px">
-                    <button class="btn btn-primary" style="width:100%" onclick="openAddRecurring()">➕ Add Recurring Day</button>
+            <div class="gcal-tz">GMT-05 &middot; EST &middot; 24h</div>
+        </div>
+        <div class="gcal-container">
+            <div class="gcal-main">
+                <div class="week-grid" id="week-grid"></div>
+            </div>
+            <div class="gcal-side">
+                <div class="card" style="padding:12px">
+                    <div class="mini-cal" id="mini-cal"></div>
+                </div>
+                <div class="card" style="margin-top:12px">
+                    <div class="card-header">&#x1f7e2; Current Session</div>
+                    <div id="current-session-panel"></div>
+                </div>
+                <div class="card" style="margin-top:12px">
+                    <div class="card-header">&#x1f501; Recurring Days</div>
+                    <div id="rec-days-list"></div>
+                    <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="openAddRecurring()">+ Add Recurring Day</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Schedule Session Modal -->
     <div class="modal-overlay" id="scheduleModal">
         <div class="modal">
-            <h3>📅 Schedule Session</h3>
-            <label>Date</label>
-            <input type="text" id="modalDate" readonly>
+            <h3 id="modalTitle">Schedule Session</h3>
             <label>Session Name</label>
-            <input type="text" id="modalName" placeholder="e.g. Monday 8PM Session">
-            <label>Time (24-hour)</label>
+            <input type="text" id="modalName" placeholder="e.g. Thursday 20:00 Session">
+            <label>Date</label>
+            <input type="date" id="modalDate">
+            <label>Start Time (24h)</label>
             <div style="display:flex;gap:8px">
-                <select id="modalHour" style="width:50%">
-                    {' '.join(f'<option value="{h}">{h:02d}</option>' for h in range(24))}
-                </select>
+                <select id="modalHour" style="width:50%">{hour_options}</select>
                 <select id="modalMinute" style="width:50%">
                     <option value="0">:00</option>
                     <option value="15">:15</option>
@@ -724,31 +821,29 @@ async def calendar_page(request):
                     <option value="45">:45</option>
                 </select>
             </div>
+            <div id="modalAttendeesSection" style="display:none">
+                <label>Attendees</label>
+                <div id="modalAttendeesList" class="attendee-list"></div>
+            </div>
             <div class="modal-actions">
                 <button class="btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
-                <button class="btn btn-primary" onclick="scheduleSession()">Schedule</button>
+                <button class="btn btn-primary" id="modalSubmitBtn" onclick="scheduleSession()">Schedule</button>
             </div>
         </div>
     </div>
 
-    <!-- Add Recurring Day Modal -->
     <div class="modal-overlay" id="recurringModal">
         <div class="modal">
-            <h3>🔁 Add Recurring Day</h3>
+            <h3>Add Recurring Day</h3>
             <label>Day of Week</label>
             <select id="recWeekday">
-                <option value="0">Monday</option>
-                <option value="1">Tuesday</option>
-                <option value="2">Wednesday</option>
-                <option value="3">Thursday</option>
-                <option value="4">Friday</option>
-                <option value="5">Saturday</option>
+                <option value="0">Monday</option><option value="1">Tuesday</option>
+                <option value="2">Wednesday</option><option value="3">Thursday</option>
+                <option value="4">Friday</option><option value="5">Saturday</option>
                 <option value="6">Sunday</option>
             </select>
             <label>Session Hour (24h)</label>
-            <select id="recHour">
-                {' '.join(f'<option value="{h}">{h:02d}:00</option>' for h in range(24))}
-            </select>
+            <select id="recHour">{hour_options_full}</select>
             <label>Post Hours Before</label>
             <input type="number" id="recPostBefore" value="12" min="1" max="48">
             <div class="modal-actions">
@@ -757,197 +852,381 @@ async def calendar_page(request):
             </div>
         </div>
     </div>
+    """
 
+    # JavaScript as a regular string (NOT f-string) to avoid backslash issues
+    # We inject variables via .replace()
+    js_part = """
     <script>
-    const WEEKDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-    let sessionDays = {session_days_json};
-    let calYear, calMonth;
+    const WEEKDAYS_SHORT = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+    const WEEKDAYS_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const TIME_SLOTS = [
+        {label:'12 AM', start:0, end:4},
+        {label:'4 AM', start:4, end:8},
+        {label:'8 AM', start:8, end:12},
+        {label:'12 PM', start:12, end:16},
+        {label:'4 PM', start:16, end:20},
+        {label:'8 PM', start:20, end:24}
+    ];
 
-    function init() {{
+    let sessionDays = __SESSION_DAYS__;
+    let currentSession = __CURRENT_SESSION__;
+    let weekStart;
+    let miniCalMonth, miniCalYear;
+
+    function init() {
         const now = new Date();
-        calYear = now.getFullYear();
-        calMonth = now.getMonth();
-        renderCalendar();
+        setWeekOf(now);
+        miniCalMonth = now.getMonth();
+        miniCalYear = now.getFullYear();
+        renderAll();
+    }
+
+    function setWeekOf(date) {
+        const d = new Date(date);
+        d.setDate(d.getDate() - d.getDay());
+        d.setHours(0,0,0,0);
+        weekStart = d;
+    }
+
+    function changeWeek(delta) {
+        weekStart.setDate(weekStart.getDate() + 7 * delta);
+        renderAll();
+    }
+
+    function goToday() {
+        setWeekOf(new Date());
+        miniCalMonth = new Date().getMonth();
+        miniCalYear = new Date().getFullYear();
+        renderAll();
+    }
+
+    function renderAll() {
+        renderWeekGrid();
+        renderMiniCal();
+        renderCurrentSession();
         renderRecurring();
-    }}
+        updateTitle();
+    }
 
-    function changeMonth(delta) {{
-        calMonth += delta;
-        if (calMonth > 11) {{ calMonth = 0; calYear++; }}
-        if (calMonth < 0) {{ calMonth = 11; calYear--; }}
-        renderCalendar();
-    }}
+    function updateTitle() {
+        const end = new Date(weekStart);
+        end.setDate(end.getDate() + 6);
+        const t = document.getElementById('week-title');
+        if (weekStart.getMonth() === end.getMonth()) {
+            t.textContent = MONTHS[weekStart.getMonth()] + ' ' + weekStart.getDate() + ' \\u2013 ' + end.getDate() + ', ' + weekStart.getFullYear();
+        } else {
+            t.textContent = MONTHS[weekStart.getMonth()].slice(0,3) + ' ' + weekStart.getDate() + ' \\u2013 ' + MONTHS[end.getMonth()].slice(0,3) + ' ' + end.getDate() + ', ' + end.getFullYear();
+        }
+    }
 
-    function goToday() {{
-        const now = new Date();
-        calYear = now.getFullYear();
-        calMonth = now.getMonth();
-        renderCalendar();
-    }}
+    function handleCellClick(el) {
+        openScheduleAt(el.dataset.date, parseInt(el.dataset.hour), parseInt(el.dataset.dow));
+    }
 
-    function renderCalendar() {{
-        const grid = document.getElementById('cal-grid');
-        const title = document.getElementById('cal-title');
-        const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-        title.textContent = months[calMonth] + ' ' + calYear;
-
-        let html = '';
-        // Day of week headers (Mon-Sun)
-        ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d => {{
-            html += '<div class="cal-dow">' + d + '</div>';
-        }});
-
-        const firstDay = new Date(calYear, calMonth, 1);
-        // JS: 0=Sun → adjust so Mon=0
-        let startDow = (firstDay.getDay() + 6) % 7;
-        const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    function renderWeekGrid() {
+        const grid = document.getElementById('week-grid');
         const today = new Date();
+        today.setHours(0,0,0,0);
+        const now = new Date();
+        let html = '';
 
-        // Previous month fill
-        const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
-        for (let i = startDow - 1; i >= 0; i--) {{
-            const d = prevMonthDays - i;
-            html += '<div class="cal-day other-month"><span class="day-num">' + d + '</span></div>';
-        }}
-
-        // Current month days
-        for (let d = 1; d <= daysInMonth; d++) {{
-            const date = new Date(calYear, calMonth, d);
-            const dow = (date.getDay() + 6) % 7; // Mon=0
-            const isToday = (date.toDateString() === today.toDateString());
-            let cls = 'cal-day' + (isToday ? ' today' : '');
-
-            // Check for recurring sessions on this weekday
-            let events = '';
-            sessionDays.forEach(sd => {{
-                if (sd.weekday === dow) {{
-                    events += '<div class="cal-event recurring">' + (sd.name || WEEKDAYS[dow]) + ' ' + String(sd.hour).padStart(2,'0') + ':00</div>';
-                }}
-            }});
-
-            const dateStr = calYear + '-' + String(calMonth+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
-            html += '<div class="' + cls + '" onclick="openSchedule(\'' + dateStr + '\',' + dow + ')">';
-            html += '<span class="day-num">' + d + '</span>';
-            if (events) html += '<div class="day-events">' + events + '</div>';
+        html += '<div class="week-header">';
+        html += '<div class="corner"><span class="gcal-tz" style="font-size:10px">GMT-05</span></div>';
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(weekStart);
+            d.setDate(d.getDate() + i);
+            const isToday = d.toDateString() === today.toDateString();
+            html += '<div class="day-col-header' + (isToday ? ' is-today' : '') + '">';
+            html += '<div class="dow">' + WEEKDAYS_SHORT[d.getDay()] + '</div>';
+            html += '<div class="day-num">' + d.getDate() + '</div>';
             html += '</div>';
-        }}
+        }
+        html += '</div>';
 
-        // Next month fill
-        const totalCells = startDow + daysInMonth;
-        const remaining = (7 - (totalCells % 7)) % 7;
-        for (let i = 1; i <= remaining; i++) {{
-            html += '<div class="cal-day other-month"><span class="day-num">' + i + '</span></div>';
-        }}
+        TIME_SLOTS.forEach(function(slot) {
+            html += '<div class="time-row">';
+            html += '<div class="time-label">' + String(slot.start).padStart(2,'0') + ':00</div>';
+
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(weekStart);
+                d.setDate(d.getDate() + i);
+                const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+                const dow = (d.getDay() + 6) % 7;
+
+                html += '<div class="time-cell" data-date="' + dateStr + '" data-hour="' + slot.start + '" data-dow="' + d.getDay() + '" onclick="handleCellClick(this)">';
+
+                sessionDays.forEach(function(sd) {
+                    if (sd.weekday === dow && sd.hour >= slot.start && sd.hour < slot.end) {
+                        const topPct = ((sd.hour - slot.start) / 4) * 100;
+                        html += '<div class="evt-block evt-recurring" style="top:' + topPct + '%;height:25%" onclick="event.stopPropagation()">';
+                        html += '<div class="evt-title">' + (sd.name || 'Session') + '</div>';
+                        html += '<div class="evt-time">' + String(sd.hour).padStart(2,'0') + ':00</div>';
+                        html += '</div>';
+                    }
+                });
+
+                if (currentSession.dt) {
+                    const sdt = new Date(currentSession.dt);
+                    const sDateStr = sdt.getFullYear() + '-' + String(sdt.getMonth()+1).padStart(2,'0') + '-' + String(sdt.getDate()).padStart(2,'0');
+                    const sHour = sdt.getHours();
+                    if (sDateStr === dateStr && sHour >= slot.start && sHour < slot.end) {
+                        const topPct = ((sHour - slot.start) / 4) * 100;
+                        const cls = currentSession.ended ? 'evt-ended' : 'evt-active';
+                        const attCount = currentSession.attendees.filter(function(a) { return a.status === 'attending'; }).length;
+                        html += '<div class="evt-block ' + cls + '" style="top:' + topPct + '%;height:30%" onclick="event.stopPropagation(); openEditSession()">';
+                        html += '<div class="evt-title">' + (currentSession.name || 'Session') + '</div>';
+                        html += '<div class="evt-time">' + String(sHour).padStart(2,'0') + ':' + String(sdt.getMinutes()).padStart(2,'0') + '</div>';
+                        html += '<div class="evt-attendees">\\ud83d\\udc65 ' + attCount + ' attending</div>';
+                        html += '</div>';
+                    }
+                }
+
+                if (d.toDateString() === new Date().toDateString()) {
+                    const nowH = now.getHours() + now.getMinutes()/60;
+                    if (nowH >= slot.start && nowH < slot.end) {
+                        const topPct = ((nowH - slot.start) / 4) * 100;
+                        html += '<div class="now-line" style="top:' + topPct + '%"></div>';
+                    }
+                }
+
+                html += '</div>';
+            }
+            html += '</div>';
+        });
 
         grid.innerHTML = html;
-    }}
+    }
 
-    function renderRecurring() {{
-        const el = document.getElementById('rec-days-list');
-        if (sessionDays.length === 0) {{
-            el.innerHTML = '<div style="color:var(--text-dim);padding:12px;font-size:13px">No recurring days configured</div>';
-            return;
-        }}
-        let html = '';
-        sessionDays.forEach((sd, i) => {{
-            html += '<div class="rec-day">';
-            html += '<span class="rec-name">' + (sd.name || WEEKDAYS[sd.weekday]) + '</span>';
-            html += '<span class="rec-time">' + String(sd.hour).padStart(2,'0') + ':00</span>';
-            html += '<span class="rec-post">post ' + sd.post_hours_before + 'h before</span>';
-            html += '<button class="btn btn-danger btn-sm" onclick="removeRecurring(' + i + ')">✖</button>';
-            html += '</div>';
-        }});
+    function renderMiniCal() {
+        const el = document.getElementById('mini-cal');
+        const today = new Date();
+        let html = '<div class="mini-cal-header">';
+        html += '<button onclick="changeMiniMonth(-1)">&#9664;</button>';
+        html += '<span>' + MONTHS[miniCalMonth].slice(0,3) + ' ' + miniCalYear + '</span>';
+        html += '<button onclick="changeMiniMonth(1)">&#9654;</button>';
+        html += '</div>';
+        html += '<div class="mini-cal-grid">';
+        ['S','M','T','W','T','F','S'].forEach(function(d) { html += '<div class="mc-dow">' + d + '</div>'; });
+
+        const first = new Date(miniCalYear, miniCalMonth, 1);
+        const startDay = first.getDay();
+        const daysInMonth = new Date(miniCalYear, miniCalMonth+1, 0).getDate();
+        const prevDays = new Date(miniCalYear, miniCalMonth, 0).getDate();
+
+        for (let i = startDay - 1; i >= 0; i--) {
+            html += '<div class="mc-day mc-other">' + (prevDays - i) + '</div>';
+        }
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dt = new Date(miniCalYear, miniCalMonth, d);
+            let cls = 'mc-day';
+            if (dt.toDateString() === today.toDateString()) cls += ' mc-today';
+            const ws = new Date(weekStart);
+            const we = new Date(weekStart); we.setDate(we.getDate() + 6);
+            if (dt >= ws && dt <= we) cls += ' mc-selected';
+            html += '<div class="' + cls + '" onclick="jumpToDate(' + miniCalYear + ',' + miniCalMonth + ',' + d + ')">' + d + '</div>';
+        }
+        const totalCells = startDay + daysInMonth;
+        const rem = (7 - totalCells % 7) % 7;
+        for (let i = 1; i <= rem; i++) html += '<div class="mc-day mc-other">' + i + '</div>';
+        html += '</div>';
         el.innerHTML = html;
-    }}
+    }
 
-    function openSchedule(dateStr, dow) {{
+    function changeMiniMonth(delta) {
+        miniCalMonth += delta;
+        if (miniCalMonth > 11) { miniCalMonth = 0; miniCalYear++; }
+        if (miniCalMonth < 0) { miniCalMonth = 11; miniCalYear--; }
+        renderMiniCal();
+    }
+
+    function jumpToDate(y,m,d) {
+        setWeekOf(new Date(y,m,d));
+        renderAll();
+    }
+
+    function renderCurrentSession() {
+        const el = document.getElementById('current-session-panel');
+        if (!currentSession.name) {
+            el.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:13px">No active session</div>';
+            return;
+        }
+        let html = '<div style="padding:8px 0">';
+        html += '<div style="font-weight:600;color:var(--text-bright);font-size:14px">' + currentSession.name + '</div>';
+        if (currentSession.dt) {
+            const dt = new Date(currentSession.dt);
+            html += '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">' + dt.toLocaleDateString() + ' \\u00b7 ' + String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0') + '</div>';
+        }
+        const status = currentSession.ended ? '<span style="color:var(--red)">\\u25cf Ended</span>' : '<span style="color:var(--green)">\\u25cf Live</span>';
+        html += '<div style="font-size:12px;margin-top:4px">' + status + '</div>';
+
+        const attending = currentSession.attendees.filter(function(a) { return a.status === 'attending'; });
+        const standby = currentSession.attendees.filter(function(a) { return a.status === 'standby'; });
+        if (attending.length > 0) {
+            html += '<div style="margin-top:10px;font-size:11px;color:var(--text-dim);text-transform:uppercase;font-weight:600">Attending (' + attending.length + ')</div>';
+            attending.forEach(function(a) {
+                const dot = a.checked_in ? 'checked' : 'pending';
+                const label = a.checked_in ? '\\u2705' : '\\u23f3';
+                html += '<div class="attendee-item"><span class="attendee-dot ' + dot + '"></span>' + a.name + ' <span style="margin-left:auto">' + label + '</span></div>';
+            });
+        }
+        if (standby.length > 0) {
+            html += '<div style="margin-top:8px;font-size:11px;color:var(--text-dim);text-transform:uppercase;font-weight:600">Standby (' + standby.length + ')</div>';
+            standby.forEach(function(a) {
+                html += '<div class="attendee-item"><span class="attendee-dot pending"></span>' + a.name + '</div>';
+            });
+        }
+        if (attending.length === 0 && standby.length === 0) {
+            html += '<div style="font-size:12px;color:var(--text-dim);margin-top:8px">No attendees yet</div>';
+        }
+        html += '<div style="margin-top:10px"><button class="btn btn-primary btn-sm" style="width:100%" onclick="openEditSession()">Edit Session</button></div>';
+        html += '</div>';
+        el.innerHTML = html;
+    }
+
+    function renderRecurring() {
+        const el = document.getElementById('rec-days-list');
+        if (sessionDays.length === 0) {
+            el.innerHTML = '<div style="color:var(--text-dim);padding:12px;font-size:13px">No recurring days</div>';
+            return;
+        }
+        let html = '';
+        sessionDays.forEach(function(sd, i) {
+            const dayName = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][sd.weekday] || sd.name;
+            html += '<div class="rec-item">';
+            html += '<div class="rec-color"></div>';
+            html += '<div class="rec-info"><div class="rec-name">' + (sd.name || dayName) + '</div>';
+            html += '<div class="rec-detail">' + String(sd.hour).padStart(2,'0') + ':00 \\u00b7 post ' + sd.post_hours_before + 'h before</div></div>';
+            html += '<button class="btn btn-danger btn-sm" onclick="removeRecurring(' + i + ')" style="padding:2px 6px;font-size:11px">\\u2715</button>';
+            html += '</div>';
+        });
+        el.innerHTML = html;
+    }
+
+    let editMode = false;
+
+    function openScheduleAt(dateStr, hour, dow) {
+        editMode = false;
+        document.getElementById('modalTitle').textContent = 'Schedule Session';
         document.getElementById('modalDate').value = dateStr;
-        // Auto-fill name from weekday
-        document.getElementById('modalName').value = WEEKDAYS[dow] + ' Session';
-        // Default to 20:00
-        document.getElementById('modalHour').value = '20';
+        document.getElementById('modalName').value = WEEKDAYS_FULL[dow] + ' ' + String(hour).padStart(2,'0') + ':00 Session';
+        document.getElementById('modalHour').value = String(hour);
         document.getElementById('modalMinute').value = '0';
+        document.getElementById('modalAttendeesSection').style.display = 'none';
+        document.getElementById('modalSubmitBtn').textContent = 'Schedule';
         document.getElementById('scheduleModal').classList.add('active');
-    }}
+    }
 
-    function closeModal(id) {{
+    function openEditSession() {
+        if (!currentSession.name) return;
+        editMode = true;
+        document.getElementById('modalTitle').textContent = 'Edit Session';
+        document.getElementById('modalName').value = currentSession.name;
+        if (currentSession.dt) {
+            const dt = new Date(currentSession.dt);
+            const dateStr = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+            document.getElementById('modalDate').value = dateStr;
+            document.getElementById('modalHour').value = String(dt.getHours());
+            document.getElementById('modalMinute').value = String(dt.getMinutes());
+        }
+        const sec = document.getElementById('modalAttendeesSection');
+        const list = document.getElementById('modalAttendeesList');
+        sec.style.display = 'block';
+        let html = '';
+        currentSession.attendees.forEach(function(a) {
+            const dot = a.checked_in ? 'checked' : 'pending';
+            const statusLabel = a.status === 'standby' ? ' (standby)' : (a.checked_in ? ' \\u2705' : '');
+            html += '<div class="attendee-item"><span class="attendee-dot ' + dot + '"></span>' + a.name + '<span style="margin-left:auto;font-size:11px;color:var(--text-dim)">' + statusLabel + '</span></div>';
+        });
+        if (!html) html = '<div style="color:var(--text-dim);font-size:13px">No attendees</div>';
+        list.innerHTML = html;
+        document.getElementById('modalSubmitBtn').textContent = 'Save Changes';
+        document.getElementById('scheduleModal').classList.add('active');
+    }
+
+    function closeModal(id) {
         document.getElementById(id).classList.remove('active');
-    }}
+    }
 
-    function scheduleSession() {{
+    function scheduleSession() {
         const date = document.getElementById('modalDate').value;
         const name = document.getElementById('modalName').value;
         const hour = parseInt(document.getElementById('modalHour').value);
         const minute = parseInt(document.getElementById('modalMinute').value);
-        if (!name) {{ alert('Please enter a session name'); return; }}
+        if (!name) { alert('Please enter a session name'); return; }
 
-        fetch('/api/schedule-session', {{
+        fetch('/api/schedule-session', {
             method: 'POST',
-            headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify({{ date, name, hour, minute }})
-        }}).then(r => r.json()).then(d => {{
-            if (d.ok) {{
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ date: date, name: name, hour: hour, minute: minute })
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) {
                 closeModal('scheduleModal');
-                showToast('Session scheduled: ' + name + ' at ' + String(hour).padStart(2,'0') + ':' + String(minute).padStart(2,'0'));
-            }} else {{ alert(d.error || 'Failed to schedule'); }}
-        }});
-    }}
+                showToast((editMode ? 'Session updated' : 'Session scheduled') + ': ' + name);
+                setTimeout(function() { location.reload(); }, 1000);
+            } else { alert(d.error || 'Failed'); }
+        });
+    }
 
-    function openAddRecurring() {{
+    function openAddRecurring() {
         document.getElementById('recWeekday').value = '0';
         document.getElementById('recHour').value = '20';
         document.getElementById('recPostBefore').value = '12';
         document.getElementById('recurringModal').classList.add('active');
-    }}
+    }
 
-    function addRecurring() {{
+    function addRecurring() {
         const weekday = parseInt(document.getElementById('recWeekday').value);
         const hour = parseInt(document.getElementById('recHour').value);
         const post_hours_before = parseInt(document.getElementById('recPostBefore').value);
-        const name = WEEKDAYS[weekday];
+        const WDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+        const name = WDAYS[weekday];
 
-        fetch('/api/session-days', {{
+        fetch('/api/session-days', {
             method: 'POST',
-            headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify({{ weekday, hour, name, post_hours_before }})
-        }}).then(r => r.json()).then(d => {{
-            if (d.ok) {{
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ weekday: weekday, hour: hour, name: name, post_hours_before: post_hours_before })
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) {
                 sessionDays = d.days;
                 closeModal('recurringModal');
-                renderCalendar();
-                renderRecurring();
+                renderAll();
                 showToast('Added recurring: ' + name + ' at ' + String(hour).padStart(2,'0') + ':00');
-            }} else {{ alert(d.error || 'Failed'); }}
-        }});
-    }}
+            } else { alert(d.error || 'Failed'); }
+        });
+    }
 
-    function removeRecurring(index) {{
+    function removeRecurring(index) {
         if (!confirm('Remove this recurring day?')) return;
-        fetch('/api/session-days', {{
+        fetch('/api/session-days', {
             method: 'DELETE',
-            headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify({{ index }})
-        }}).then(r => r.json()).then(d => {{
-            if (d.ok) {{
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ index: index })
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) {
                 sessionDays = d.days;
-                renderCalendar();
-                renderRecurring();
+                renderAll();
                 showToast('Recurring day removed');
-            }} else {{ alert(d.error || 'Failed'); }}
-        }});
-    }}
+            } else { alert(d.error || 'Failed'); }
+        });
+    }
 
-    function showToast(msg) {{
+    function showToast(msg) {
         const t = document.getElementById('toast');
         t.textContent = msg;
         t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), 3000);
-    }}
+        setTimeout(function() { t.classList.remove('show'); }, 3000);
+    }
 
     init();
-    </script>"""
+    setInterval(function() { renderWeekGrid(); }, 60000);
+    </script>
+    """.replace('__SESSION_DAYS__', session_days_json).replace('__CURRENT_SESSION__', current_session_json)
 
+    content = html_part + js_part
     return web.Response(text=_page("Calendar", content, "calendar"), content_type="text/html")
+
 
 # ── API Endpoints ────────────────────────────────────────────────
 @routes.get("/api/logs")
