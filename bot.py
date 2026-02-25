@@ -951,11 +951,11 @@ class ScheduleView(discord.ui.View):
         for i, (uid_str, name, attended, total, rate, streak, no_shows) in enumerate(entries[:15]):
             medal = medals[i] if i < 3 else f"{i+1}."
             streak_str = f" 🔥{streak}" if streak >= 3 else ""
-            noshow_str = f" ⚠️{no_shows}NS" if no_shows > 0 else ""
+            stats_str = f"✅{attended} Attended · ❌{no_shows} No-Show"
             if uid_str == clicker_id:
-                lines.append(f"{medal} ⭐ __**{name}**__ — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
+                lines.append(f"{medal} ⭐ __**{name}**__ — {stats_str} ({rate:.0f}%){streak_str}")
             else:
-                lines.append(f"{medal} **{name}** — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
+                lines.append(f"{medal} **{name}** — {stats_str} ({rate:.0f}%){streak_str}")
 
         embed = discord.Embed(title="📊 Attendance Leaderboard", description="\n".join(lines), color=0x3498db)
         _leaderboard_cooldown = now
