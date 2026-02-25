@@ -1514,7 +1514,7 @@ class HelpView(discord.ui.View):
 
 @bot.command(help="Show this help menu.")
 async def help(ctx):
-    """DM the user a beautiful interactive help menu."""
+    """Send a whisper-style help menu in the current channel (auto-deletes)."""
     # Delete the !help message from the channel to keep it clean
     try:
         await ctx.message.delete()
@@ -1527,20 +1527,15 @@ async def help(ctx):
     # Set the right footer for the initial embed
     embed = _build_everyone_embed()
     if user_is_admin:
-        embed.set_footer(text="Page 1/2 · Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+        embed.set_footer(text="Page 1/2 · Only you can see this · Auto-deletes in 60s")
     else:
-        embed.set_footer(text="Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+        embed.set_footer(text="Only you can see this · Auto-deletes in 60s")
 
-    # DM the help menu so only they can see it
-    try:
-        await ctx.author.send(embed=embed, view=view)
-    except discord.Forbidden:
-        # Fallback: if DMs are disabled, send in channel with a short auto-delete
-        view2 = HelpView(ctx.author.id, show_admin=user_is_admin)
-        await ctx.send(
-            f"{ctx.author.mention} I couldn't DM you — here's the help (auto-deletes in 30s):",
-            embed=embed, view=view2, delete_after=30
-        )
+    # Send in-channel with auto-delete (whisper style)
+    await ctx.send(
+        f"{ctx.author.mention}",
+        embed=embed, view=view, delete_after=60
+    )
 
 # ----------------------------
 # Automatic Scheduler
