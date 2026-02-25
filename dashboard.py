@@ -825,6 +825,13 @@ async def calendar_page(request):
                 <label>Attendees</label>
                 <div id="modalAttendeesList" class="attendee-list"></div>
             </div>
+            <div id="sendToChannelSection" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+                <label>Send Update To Channel</label>
+                <select id="channelSelect" style="margin-bottom:8px"><option value="">Loading channels...</option></select>
+                <label>Message / Note (optional)</label>
+                <input type="text" id="channelMessage" placeholder="e.g. Date changed to Thursday">
+                <button class="btn btn-primary" style="width:100%;margin-top:8px;background:#43b581" onclick="sendToChannel()">Send to Channel</button>
+            </div>
             <div class="modal-actions">
                 <button class="btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
                 <button class="btn btn-primary" id="modalSubmitBtn" onclick="scheduleSession()">Schedule</button>
@@ -1142,11 +1149,54 @@ async def calendar_page(request):
         if (!html) html = '<div style="color:var(--text-dim);font-size:13px">No attendees</div>';
         list.innerHTML = html;
         document.getElementById('modalSubmitBtn').textContent = 'Save Changes';
+        document.getElementById('sendToChannelSection').style.display = 'block';
+        loadChannels();
         document.getElementById('scheduleModal').classList.add('active');
+    }
+
+    function loadChannels() {
+        fetch('/api/channels').then(function(r) { return r.json(); }).then(function(d) {
+            const sel = document.getElementById('channelSelect');
+            sel.innerHTML = '';
+            if (d.channels && d.channels.length > 0) {
+                d.channels.forEach(function(ch) {
+                    const opt = document.createElement('option');
+                    opt.value = ch.id;
+                    opt.textContent = ch.name + ' (' + ch.guild + ')';
+                    sel.appendChild(opt);
+                });
+            } else {
+                sel.innerHTML = '<option value="">No channels available</option>';
+            }
+        });
+    }
+
+    function sendToChannel() {
+        const channelId = document.getElementById('channelSelect').value;
+        const msg = document.getElementById('channelMessage').value;
+        const name = document.getElementById('modalName').value;
+        const date = document.getElementById('modalDate').value;
+        const hour = parseInt(document.getElementById('modalHour').value);
+        const minute = parseInt(document.getElementById('modalMinute').value);
+
+        if (!channelId) { alert('Please select a channel'); return; }
+        if (!name) { alert('Please enter a session name'); return; }
+
+        fetch('/api/send-to-channel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ channel_id: channelId, name: name, date: date, hour: hour, minute: minute, message: msg })
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) {
+                showToast('Session update sent to channel!');
+                document.getElementById('channelMessage').value = '';
+            } else { alert(d.error || 'Failed to send'); }
+        });
     }
 
     function closeModal(id) {
         document.getElementById(id).classList.remove('active');
+        document.getElementById('sendToChannelSection').style.display = 'none';
     }
 
     function scheduleSession() {
@@ -1387,6 +1437,98 @@ async def api_remove_session_day(request):
             await push_log(f"🔁 Dashboard: Removed recurring day {removed.get('name', '?')}")
             return web.json_response({"ok": True, "days": session_days})
     return web.json_response({"error": "Invalid index"}, status=400)
+
+@routes.get("/api/channels")
+async def api_channels(request):
+    """Return list of text channels the bot can see."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    channels = []
+    if bot_ref:
+        for guild in bot_ref.guilds:
+            for ch in guild.text_channels:
+                channels.append({
+                    "id": str(ch.id),
+                    "name": f"#{ch.name}",
+                    "guild": guild.name,
+                })
+    return web.json_response({"channels": channels})
+
+@routes.post("/api/send-to-channel")
+async def api_send_to_channel(request):
+    """Send session update embed to a Discord channel."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    try:
+        data = await request.json()
+        channel_id = data.get("channel_id")
+        session_name_val = data.get("name", "")
+        date_str = data.get("date", "")
+        hour = int(data.get("hour", 0))
+        minute = int(data.get("minute", 0))
+        message_text = data.get("message", "")
+
+        if not channel_id:
+            return web.json_response({"error": "channel_id required"}, status=400)
+
+        channel = await bot_ref.fetch_channel(int(channel_id))
+
+        import discord
+        import pytz
+        EST = pytz.timezone("US/Eastern")
+
+        # Build the embed
+        embed = discord.Embed(
+            title=f"📅 Session Update: {session_name_val}",
+            color=0x5865F2,  # Discord blurple
+        )
+
+        if date_str:
+            dt = datetime.strptime(f"{date_str} {hour:02d}:{minute:02d}", "%Y-%m-%d %H:%M")
+            dt = EST.localize(dt)
+            unix_ts = int(dt.timestamp())
+            embed.add_field(name="Date & Time", value=f"<t:{unix_ts}:f> (<t:{unix_ts}:R>)", inline=False)
+
+        # Add current attendee info
+        g = _state_getters
+        attending_ids = g.get("attending_ids", lambda: [])()
+        standby_ids = g.get("standby_ids", lambda: [])()
+        checked_in_ids = g.get("checked_in_ids", lambda: set())()
+
+        if attending_ids:
+            names = []
+            for uid in attending_ids:
+                try:
+                    u = await bot_ref.fetch_user(uid)
+                    check = "✅" if uid in checked_in_ids else "⏳"
+                    names.append(f"{check} {u.display_name}")
+                except:
+                    names.append(f"⏳ User {uid}")
+            embed.add_field(name=f"Attending ({len(attending_ids)})", value="\n".join(names), inline=False)
+
+        if standby_ids:
+            names = []
+            for uid in standby_ids:
+                try:
+                    u = await bot_ref.fetch_user(uid)
+                    names.append(f"🔹 {u.display_name}")
+                except:
+                    names.append(f"🔹 User {uid}")
+            embed.add_field(name=f"Standby ({len(standby_ids)})", value="\n".join(names), inline=False)
+
+        if message_text:
+            embed.add_field(name="📝 Note", value=message_text, inline=False)
+
+        embed.set_footer(text="Updated from Dashboard")
+
+        await channel.send(embed=embed)
+        await push_log(f"📤 Dashboard: Sent session update to #{channel.name}")
+        return web.json_response({"ok": True})
+    except Exception as e:
+        await push_log(f"❌ Send to channel error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
 
 # ── Server Lifecycle ─────────────────────────────────────────────
 async def start_dashboard(bot):
