@@ -30,6 +30,7 @@ bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 # Config
 # ----------------------------
 ADMIN_ID = 740522966474948638
+OWNER_IDS = {ADMIN_ID, 776628215066132502}  # Bot owner + David — only these can reset stats
 DEFAULT_MAX_ATTENDING = 10
 DEFAULT_NOSHOW_THRESHOLD = 3  # auto-standby after this many no-shows
 DEFAULT_CHECKIN_GRACE = 30  # minutes after session start before auto-relieve
@@ -1462,10 +1463,11 @@ async def kick(ctx, member: discord.Member):
     else:
         await ctx.send(f"❌ {member.mention} is not in any list.")
 
-@bot.command(help="Reset a user's attendance stats. Admin only. Usage: !resetstats @user")
+@bot.command(help="Reset a user's attendance stats. Owner only. Usage: !resetstats @user")
 async def resetstats(ctx, member: discord.Member):
     """Reset a user's attendance stats. Usage: !resetstats @user"""
-    if not await check_admin(ctx):
+    if ctx.author.id not in OWNER_IDS:
+        await ctx.send("❌ Only bot owners can reset stats.", delete_after=5)
         return
     key = str(member.id)
     if key in attendance_history:
