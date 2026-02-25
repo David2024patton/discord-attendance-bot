@@ -170,6 +170,16 @@ tr:hover td { background: var(--bg3); }
 .toast { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: white; padding: 12px 20px; border-radius: var(--radius); font-size: 14px; font-weight: 600; transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 999; }
 .toast.show { transform: translateY(0); opacity: 1; }
 
+/* Role chips */
+.role-chip { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:14px; font-size:12px; font-weight:600; cursor:pointer; border:2px solid transparent; transition:all 0.15s; margin:3px; user-select:none; }
+.role-chip input { display:none; }
+.role-chip:hover { filter:brightness(1.2); }
+.role-chip.selected { border-color:var(--text-bright); }
+.role-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.role-section-title { font-size:12px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; font-weight:600; margin-bottom:6px; margin-top:10px; }
+.role-section-title:first-child { margin-top:0; }
+.role-list { max-height:200px; overflow-y:auto; padding:4px 0; }
+
 /* Mobile hamburger - hidden on desktop */
 .mobile-hamburger { display:none; }
 
@@ -607,6 +617,8 @@ async def settings_page(request):
     import html as html_mod
     start_msg_safe = html_mod.escape(start_msg or "", quote=True)
     stop_msg_safe = html_mod.escape(stop_msg or "", quote=True)
+    admin_roles_json = json.dumps(admin_roles or [])
+    beta_roles_json = json.dumps(beta_roles or [])
 
     days_html = ""
     for d in session_days:
@@ -658,15 +670,21 @@ async def settings_page(request):
         <div class="grid grid-2" style="margin-top:16px">
             <div class="card">
                 <div class="card-header">Role Configuration</div>
-                <div class="setting-row">
-                    <div><div class="setting-label">Admin Roles</div><div class="setting-desc">Comma-separated role names with admin access</div></div>
-                    <input class="setting-input" type="text" id="adminRoles" value="{', '.join(admin_roles)}" style="width:200px;font-size:13px">
+                <div style="margin-bottom:12px">
+                    <div class="setting-label">Admin Roles</div>
+                    <div class="setting-desc">Roles with full admin access to the dashboard and bot</div>
+                    <div id="adminRolesContainer" class="role-list" style="margin-top:8px">
+                        <span style="color:var(--text-dim);font-size:13px">Loading roles...</span>
+                    </div>
                 </div>
-                <div class="setting-row">
-                    <div><div class="setting-label">Beta Roles</div><div class="setting-desc">Comma-separated role names that can schedule</div></div>
-                    <input class="setting-input" type="text" id="betaRoles" value="{', '.join(beta_roles)}" style="width:200px;font-size:13px">
+                <div style="margin-bottom:12px">
+                    <div class="setting-label">Beta Roles</div>
+                    <div class="setting-desc">Roles that can schedule sessions</div>
+                    <div id="betaRolesContainer" class="role-list" style="margin-top:8px">
+                        <span style="color:var(--text-dim);font-size:13px">Loading roles...</span>
+                    </div>
                 </div>
-                <div style="margin-top:16px;text-align:right">
+                <div style="text-align:right">
                     <button class="btn btn-primary" onclick="saveRoles()">Save Roles</button>
                 </div>
             </div>
@@ -719,6 +737,45 @@ async def settings_page(request):
         populateGuildDropdown('archiveGuild', 'archiveCh', _currentArchive);
         populateGuildDropdown('statusGuild', 'statusCh', _currentStatus);
     }});
+
+    // Role chip selectors
+    const _currentAdminRoles = {admin_roles_json};
+    const _currentBetaRoles = {beta_roles_json};
+
+    fetch('/api/roles').then(r => r.json()).then(d => {{
+        const guilds = d.guilds || [];
+        buildRoleChips('adminRolesContainer', guilds, _currentAdminRoles);
+        buildRoleChips('betaRolesContainer', guilds, _currentBetaRoles);
+    }});
+
+    function buildRoleChips(containerId, guilds, selectedNames) {{
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        if (guilds.length === 0) {{
+            container.innerHTML = '<span style="color:var(--text-dim);font-size:13px">No roles found — is the bot in a guild?</span>';
+            return;
+        }}
+        guilds.forEach(g => {{
+            if (guilds.length > 1) {{
+                const title = document.createElement('div');
+                title.className = 'role-section-title';
+                title.textContent = g.name;
+                container.appendChild(title);
+            }}
+            g.roles.forEach(role => {{
+                const chip = document.createElement('label');
+                chip.className = 'role-chip';
+                chip.dataset.roleName = role.name;
+                const bgColor = role.color || '#99aab5';
+                chip.style.background = bgColor + '22';
+                chip.style.color = bgColor;
+                if (selectedNames.includes(role.name)) chip.classList.add('selected');
+                chip.innerHTML = '<span class="role-dot" style="background:' + bgColor + '"></span>' + role.name;
+                chip.addEventListener('click', function() {{ chip.classList.toggle('selected'); }});
+                container.appendChild(chip);
+            }});
+        }});
+    }}
 
     function populateGuildDropdown(guildSelId, chSelId, currentChId) {{
         const gSel = document.getElementById(guildSelId);
@@ -778,10 +835,15 @@ async def settings_page(request):
         _post('/api/settings', {{ archive_channel_id: document.getElementById('archiveCh').value }}, 'Channel settings saved!');
     }}
     function saveRoles() {{
-        _post('/api/settings', {{
-            admin_role_names: document.getElementById('adminRoles').value.split(',').map(s=>s.trim()).filter(Boolean),
-            beta_role_names: document.getElementById('betaRoles').value.split(',').map(s=>s.trim()).filter(Boolean)
-        }}, 'Role settings saved!');
+        const adminNames = [];
+        document.querySelectorAll('#adminRolesContainer .role-chip.selected').forEach(el => {{
+            adminNames.push(el.dataset.roleName);
+        }});
+        const betaNames = [];
+        document.querySelectorAll('#betaRolesContainer .role-chip.selected').forEach(el => {{
+            betaNames.push(el.dataset.roleName);
+        }});
+        _post('/api/settings', {{ admin_role_names: adminNames, beta_role_names: betaNames }}, 'Role settings saved!');
     }}
     function saveStatus() {{
         _post('/api/settings', {{
@@ -1681,6 +1743,33 @@ async def api_channels(request):
                 "channels": guild_channels,
             })
     return web.json_response({"channels": channels, "guilds": guilds})
+
+@routes.get("/api/roles")
+async def api_roles(request):
+    """Return list of roles grouped by guild for role selectors."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    guilds = []
+    if bot_ref:
+        for guild in bot_ref.guilds:
+            guild_roles = []
+            for role in sorted(guild.roles, key=lambda r: r.position, reverse=True):
+                # Skip @everyone and bot-managed roles
+                if role.is_default() or role.managed:
+                    continue
+                guild_roles.append({
+                    "name": role.name,
+                    "id": str(role.id),
+                    "color": f"#{role.color.value:06x}" if role.color.value else None,
+                    "position": role.position,
+                })
+            guilds.append({
+                "id": str(guild.id),
+                "name": guild.name,
+                "roles": guild_roles,
+            })
+    return web.json_response({"guilds": guilds})
 
 @routes.post("/api/send-to-channel")
 async def api_send_to_channel(request):
