@@ -835,7 +835,7 @@ class ScheduleView(discord.ui.View):
         await interaction.response.send_message("Added to standby.", ephemeral=True)
         await self.update_embed()
 
-    @discord.ui.button(label="Not Attending", style=discord.ButtonStyle.danger, emoji="❌", custom_id="schedule_not_attend")
+    @discord.ui.button(label="Not Attending", style=discord.ButtonStyle.danger, emoji="😞", custom_id="schedule_not_attend")
     async def not_attend(self, interaction: discord.Interaction, button: discord.ui.Button):
         user = interaction.user
         if session_has_started() or session_ended:
@@ -876,7 +876,7 @@ class ScheduleView(discord.ui.View):
         )
         await self.update_embed()
 
-    @discord.ui.button(label="End Session", style=discord.ButtonStyle.secondary, emoji="⬜", custom_id="schedule_end_session", row=1)
+    @discord.ui.button(label="End Session", style=discord.ButtonStyle.secondary, emoji="🔴", custom_id="schedule_end_session", row=1)
     async def end_session_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Only admins can end a session.", ephemeral=True)
