@@ -249,9 +249,13 @@ def record_no_show(user_id):
     save_history()
 
 def is_auto_standby(user_id):
-    """Users with too many no-shows get auto-placed on standby"""
+    """Rate-based: auto-standby if no-show rate >= 60% with at least 3 signups"""
     stats = get_user_stats(user_id)
-    return stats["no_shows"] >= NOSHOW_THRESHOLD
+    total = stats["total_signups"]
+    if total < 3:
+        return False  # Not enough data to judge
+    no_show_rate = stats["no_shows"] / total
+    return no_show_rate >= 0.6  # 60%+ no-show rate
 
 def streak_badge(user_id):
     stats = get_user_stats(user_id)
@@ -959,10 +963,13 @@ class ScheduleView(discord.ui.View):
 
         # No-show penalty: auto-standby if too many no-shows
         if is_auto_standby(user.id):
+            stats = get_user_stats(user.id)
+            rate = int((stats['no_shows'] / stats['total_signups']) * 100)
             standby.append(user)
             sync_ids_from_users()
             await interaction.response.send_message(
-                f"⚠️ Due to {NOSHOW_THRESHOLD}+ no-shows, you've been placed on **standby**. Check in to improve your standing!",
+                f"⚠️ Your no-show rate is **{rate}%** — you've been placed on **standby**. "
+                f"Check in to future sessions to lower your rate!",
                 ephemeral=True
             )
             await self.update_embed()
@@ -1866,17 +1873,20 @@ async def checkin_manager():
                     record_no_show(uid)
                     no_show_users.append(uid)
 
-                    # Warn on penultimate no-show
+                    # Warn when no-show rate is getting high (50%+ with 2+ signups)
                     stats = get_user_stats(uid)
-                    if stats["no_shows"] == NOSHOW_THRESHOLD - 1:
-                        try:
-                            user = await bot.fetch_user(uid)
-                            await user.send(
-                                f"⚠️ **Warning:** You have **{stats['no_shows']}** no-shows. "
-                                f"One more and you'll be auto-placed on **standby** for future sessions."
-                            )
-                        except:
-                            pass
+                    total = stats["total_signups"]
+                    if total >= 2:
+                        rate = int((stats["no_shows"] / total) * 100)
+                        if 50 <= rate < 60:
+                            try:
+                                user = await bot.fetch_user(uid)
+                                await user.send(
+                                    f"⚠️ **Warning:** Your no-show rate is **{rate}%**. "
+                                    f"At 60%+ you'll be auto-placed on **standby**. Check in to improve!"
+                                )
+                            except:
+                                pass
 
             # AUTO-RELIEVE: remove no-shows from attending, offer spots to standby
             for uid in no_show_users:
