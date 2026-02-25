@@ -211,6 +211,7 @@ def _sidebar(active="home"):
         </div>
         <nav class="sidebar-nav">
             <a href="/" class="{cls('home')}"><span class="icon">📊</span><span class="label">Dashboard</span></a>
+            <a href="/calendar" class="{cls('calendar')}"><span class="icon">📅</span><span class="label">Calendar</span></a>
             <a href="/users" class="{cls('users')}"><span class="icon">👥</span><span class="label">Users</span></a>
             <a href="/logs" class="{cls('logs')}"><span class="icon">📋</span><span class="label">Logs</span></a>
             <a href="/settings" class="{cls('settings')}"><span class="icon">⚙️</span><span class="label">Settings</span></a>
@@ -513,20 +514,24 @@ async def settings_page(request):
 
     g = _state_getters
     max_attending = g.get("max_attending", lambda: 10)()
-    noshow_thresh = g.get("noshow_threshold", lambda: 5)()
+    noshow_thresh = g.get("noshow_threshold", lambda: 3)()
     grace = g.get("checkin_grace", lambda: 30)()
     session_days = g.get("session_days", lambda: [])()
     admin_roles = g.get("admin_role_names", lambda: [])()
     beta_roles = g.get("beta_role_names", lambda: [])()
+    archive_ch = g.get("archive_channel_id", lambda: "")()
+    schedule_ch = g.get("schedule_channel_id", lambda: "")()
 
     days_html = ""
     for d in session_days:
-        days_html += f'<li>{d.get("name", "?")} at {d.get("hour", 0)}:00 (post {d.get("post_hours_before", 0)}h before)</li>'
+        h = d.get("hour", 0)
+        days_html += f'<li>{d.get("name", "?")} at {h:02d}:00 (post {d.get("post_hours_before", 0)}h before)</li>'
     if not days_html:
         days_html = '<li style="color:var(--text-dim)">No days configured</li>'
 
     content = f"""
     <div class="container">
+        <h2 class="page-title">⚙️ Settings</h2>
         <div class="grid grid-2">
             <div class="card">
                 <div class="card-header">Session Settings</div>
@@ -535,23 +540,53 @@ async def settings_page(request):
                     <input class="setting-input" type="number" id="maxAttending" value="{max_attending}" min="1" max="50">
                 </div>
                 <div class="setting-row">
-                    <div><div class="setting-label">No-Show Rate Threshold</div><div class="setting-desc">Auto-standby at 60%+ no-show rate (min 3 signups)</div></div>
-                    <span style="color:var(--text-dim)">60%</span>
+                    <div><div class="setting-label">No-Show Threshold</div><div class="setting-desc">Auto-standby after this many no-shows</div></div>
+                    <input class="setting-input" type="number" id="noshowThreshold" value="{noshow_thresh}" min="1" max="20">
                 </div>
                 <div class="setting-row">
                     <div><div class="setting-label">Check-in Grace (min)</div><div class="setting-desc">Minutes to check in after session starts</div></div>
                     <input class="setting-input" type="number" id="graceMinutes" value="{grace}" min="5" max="120">
                 </div>
                 <div style="margin-top:16px;text-align:right">
-                    <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn btn-primary" onclick="saveSettings()">Save Session Settings</button>
                 </div>
             </div>
             <div class="card">
-                <div class="card-header">Session Days</div>
+                <div class="card-header">Discord Channels</div>
+                <div class="setting-row">
+                    <div><div class="setting-label">Schedule Channel ID</div><div class="setting-desc">Channel where session posts appear</div></div>
+                    <input class="setting-input" type="text" id="scheduleCh" value="{schedule_ch}" style="width:180px;font-size:12px" readonly>
+                </div>
+                <div class="setting-row">
+                    <div><div class="setting-label">Archive Channel ID</div><div class="setting-desc">Channel for session archives</div></div>
+                    <input class="setting-input" type="text" id="archiveCh" value="{archive_ch}" style="width:180px;font-size:12px">
+                </div>
+                <div style="margin-top:16px;text-align:right">
+                    <button class="btn btn-primary" onclick="saveChannels()">Save Channels</button>
+                </div>
+            </div>
+        </div>
+        <div class="grid grid-2" style="margin-top:16px">
+            <div class="card">
+                <div class="card-header">Role Configuration</div>
+                <div class="setting-row">
+                    <div><div class="setting-label">Admin Roles</div><div class="setting-desc">Comma-separated role names with admin access</div></div>
+                    <input class="setting-input" type="text" id="adminRoles" value="{', '.join(admin_roles)}" style="width:200px;font-size:13px">
+                </div>
+                <div class="setting-row">
+                    <div><div class="setting-label">Beta Roles</div><div class="setting-desc">Comma-separated role names that can schedule</div></div>
+                    <input class="setting-input" type="text" id="betaRoles" value="{', '.join(beta_roles)}" style="width:200px;font-size:13px">
+                </div>
+                <div style="margin-top:16px;text-align:right">
+                    <button class="btn btn-primary" onclick="saveRoles()">Save Roles</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">Recurring Session Days</div>
                 <ul class="user-list">{days_html}</ul>
-                <div class="card-header" style="margin-top:16px">Roles</div>
-                <div style="font-size:13px;margin-bottom:6px"><strong>Admin:</strong> {', '.join(admin_roles) or 'None'}</div>
-                <div style="font-size:13px"><strong>Beta:</strong> {', '.join(beta_roles) or 'None'}</div>
+                <div style="font-size:12px;color:var(--text-dim);margin-top:8px">
+                    Manage recurring days on the <a href="/calendar">Calendar</a> page
+                </div>
             </div>
         </div>
     </div>
@@ -559,16 +594,33 @@ async def settings_page(request):
     function saveSettings() {{
         const data = {{
             max_attending: parseInt(document.getElementById('maxAttending').value),
-            checkin_grace: parseInt(document.getElementById('graceMinutes').value)
+            checkin_grace: parseInt(document.getElementById('graceMinutes').value),
+            noshow_threshold: parseInt(document.getElementById('noshowThreshold').value)
         }};
-        fetch('/api/settings', {{
+        _post('/api/settings', data, 'Session settings saved!');
+    }}
+    function saveChannels() {{
+        const data = {{
+            archive_channel_id: document.getElementById('archiveCh').value
+        }};
+        _post('/api/settings', data, 'Channel settings saved!');
+    }}
+    function saveRoles() {{
+        const data = {{
+            admin_role_names: document.getElementById('adminRoles').value.split(',').map(s=>s.trim()).filter(Boolean),
+            beta_role_names: document.getElementById('betaRoles').value.split(',').map(s=>s.trim()).filter(Boolean)
+        }};
+        _post('/api/settings', data, 'Role settings saved!');
+    }}
+    function _post(url, data, msg) {{
+        fetch(url, {{
             method: 'POST',
             headers: {{'Content-Type': 'application/json'}},
             body: JSON.stringify(data)
         }}).then(r => r.json()).then(d => {{
             if (d.ok) {{
                 const t = document.getElementById('toast');
-                t.textContent = 'Settings saved!';
+                t.textContent = msg;
                 t.classList.add('show');
                 setTimeout(() => t.classList.remove('show'), 3000);
             }} else {{ alert(d.error || 'Failed'); }}
@@ -577,6 +629,325 @@ async def settings_page(request):
     </script>"""
 
     return web.Response(text=_page("Settings", content, "settings"), content_type="text/html")
+
+# ── Calendar Page ────────────────────────────────────────────────
+CALENDAR_CSS = """
+<style>
+.cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.cal-header h3 { color:var(--text-bright); font-size:20px; }
+.cal-nav { display:flex; gap:8px; }
+.cal-nav button { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:6px 14px; border-radius:var(--radius); cursor:pointer; font-size:14px; }
+.cal-nav button:hover { background:var(--accent); color:white; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.cal-dow { text-align:center; font-size:11px; text-transform:uppercase; color:var(--text-dim); font-weight:600; padding:8px 0; }
+.cal-day { background:var(--bg2); border:1px solid var(--border); border-radius:4px; min-height:90px; padding:6px; cursor:pointer; transition:all 0.15s; position:relative; }
+.cal-day:hover { border-color:var(--accent); background:var(--bg3); }
+.cal-day.today { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+.cal-day.other-month { opacity:0.3; }
+.cal-day .day-num { font-size:13px; font-weight:600; color:var(--text-bright); }
+.cal-day .day-events { margin-top:4px; }
+.cal-event { font-size:10px; padding:2px 4px; border-radius:3px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cal-event.recurring { background:rgba(88,101,242,0.25); color:var(--accent); }
+.cal-event.oneoff { background:rgba(67,181,129,0.25); color:var(--green); }
+/* Modal */
+.modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:500; align-items:center; justify-content:center; }
+.modal-overlay.active { display:flex; }
+.modal { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:28px; width:420px; max-width:90vw; }
+.modal h3 { color:var(--text-bright); margin-bottom:16px; font-size:18px; }
+.modal label { display:block; font-size:13px; color:var(--text-dim); margin-bottom:4px; margin-top:12px; }
+.modal input, .modal select { width:100%; padding:8px 12px; background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:14px; }
+.modal input:focus, .modal select:focus { border-color:var(--accent); outline:none; }
+.modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+.modal .btn-secondary { background:var(--bg3); color:var(--text); border:1px solid var(--border); padding:8px 16px; border-radius:var(--radius); cursor:pointer; font-size:13px; }
+.modal .btn-secondary:hover { background:var(--border); }
+/* Recurring day manager */
+.rec-day { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); }
+.rec-day:last-child { border-bottom:none; }
+.rec-day .rec-name { flex:1; font-weight:500; }
+.rec-day .rec-time { color:var(--accent); font-size:13px; }
+.rec-day .rec-post { color:var(--text-dim); font-size:12px; }
+</style>
+"""
+
+@routes.get("/calendar")
+async def calendar_page(request):
+    if not _check_auth(request):
+        raise web.HTTPFound("/login")
+
+    g = _state_getters
+    session_days = g.get("session_days", lambda: [])()
+    session_days_json = json.dumps(session_days)
+
+    content = f"""
+    {CALENDAR_CSS}
+    <div class="container">
+        <h2 class="page-title">📅 Session Calendar</h2>
+        <div class="grid grid-2" style="grid-template-columns:2fr 1fr">
+            <div class="card">
+                <div class="cal-header">
+                    <div class="cal-nav">
+                        <button onclick="changeMonth(-1)">◀</button>
+                        <button onclick="goToday()">Today</button>
+                        <button onclick="changeMonth(1)">▶</button>
+                    </div>
+                    <h3 id="cal-title"></h3>
+                </div>
+                <div class="cal-grid" id="cal-grid"></div>
+            </div>
+            <div class="card">
+                <div class="card-header">Recurring Session Days</div>
+                <div id="rec-days-list"></div>
+                <div style="margin-top:12px">
+                    <button class="btn btn-primary" style="width:100%" onclick="openAddRecurring()">➕ Add Recurring Day</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Session Modal -->
+    <div class="modal-overlay" id="scheduleModal">
+        <div class="modal">
+            <h3>📅 Schedule Session</h3>
+            <label>Date</label>
+            <input type="text" id="modalDate" readonly>
+            <label>Session Name</label>
+            <input type="text" id="modalName" placeholder="e.g. Monday 8PM Session">
+            <label>Time (24-hour)</label>
+            <div style="display:flex;gap:8px">
+                <select id="modalHour" style="width:50%">
+                    {' '.join(f'<option value="{h}">{h:02d}</option>' for h in range(24))}
+                </select>
+                <select id="modalMinute" style="width:50%">
+                    <option value="0">:00</option>
+                    <option value="15">:15</option>
+                    <option value="30">:30</option>
+                    <option value="45">:45</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="scheduleSession()">Schedule</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Recurring Day Modal -->
+    <div class="modal-overlay" id="recurringModal">
+        <div class="modal">
+            <h3>🔁 Add Recurring Day</h3>
+            <label>Day of Week</label>
+            <select id="recWeekday">
+                <option value="0">Monday</option>
+                <option value="1">Tuesday</option>
+                <option value="2">Wednesday</option>
+                <option value="3">Thursday</option>
+                <option value="4">Friday</option>
+                <option value="5">Saturday</option>
+                <option value="6">Sunday</option>
+            </select>
+            <label>Session Hour (24h)</label>
+            <select id="recHour">
+                {' '.join(f'<option value="{h}">{h:02d}:00</option>' for h in range(24))}
+            </select>
+            <label>Post Hours Before</label>
+            <input type="number" id="recPostBefore" value="12" min="1" max="48">
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal('recurringModal')">Cancel</button>
+                <button class="btn btn-primary" onclick="addRecurring()">Add</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const WEEKDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    let sessionDays = {session_days_json};
+    let calYear, calMonth;
+
+    function init() {{
+        const now = new Date();
+        calYear = now.getFullYear();
+        calMonth = now.getMonth();
+        renderCalendar();
+        renderRecurring();
+    }}
+
+    function changeMonth(delta) {{
+        calMonth += delta;
+        if (calMonth > 11) {{ calMonth = 0; calYear++; }}
+        if (calMonth < 0) {{ calMonth = 11; calYear--; }}
+        renderCalendar();
+    }}
+
+    function goToday() {{
+        const now = new Date();
+        calYear = now.getFullYear();
+        calMonth = now.getMonth();
+        renderCalendar();
+    }}
+
+    function renderCalendar() {{
+        const grid = document.getElementById('cal-grid');
+        const title = document.getElementById('cal-title');
+        const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        title.textContent = months[calMonth] + ' ' + calYear;
+
+        let html = '';
+        // Day of week headers (Mon-Sun)
+        ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d => {{
+            html += '<div class="cal-dow">' + d + '</div>';
+        }});
+
+        const firstDay = new Date(calYear, calMonth, 1);
+        // JS: 0=Sun → adjust so Mon=0
+        let startDow = (firstDay.getDay() + 6) % 7;
+        const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+        const today = new Date();
+
+        // Previous month fill
+        const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
+        for (let i = startDow - 1; i >= 0; i--) {{
+            const d = prevMonthDays - i;
+            html += '<div class="cal-day other-month"><span class="day-num">' + d + '</span></div>';
+        }}
+
+        // Current month days
+        for (let d = 1; d <= daysInMonth; d++) {{
+            const date = new Date(calYear, calMonth, d);
+            const dow = (date.getDay() + 6) % 7; // Mon=0
+            const isToday = (date.toDateString() === today.toDateString());
+            let cls = 'cal-day' + (isToday ? ' today' : '');
+
+            // Check for recurring sessions on this weekday
+            let events = '';
+            sessionDays.forEach(sd => {{
+                if (sd.weekday === dow) {{
+                    events += '<div class="cal-event recurring">' + (sd.name || WEEKDAYS[dow]) + ' ' + String(sd.hour).padStart(2,'0') + ':00</div>';
+                }}
+            }});
+
+            const dateStr = calYear + '-' + String(calMonth+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+            html += '<div class="' + cls + '" onclick="openSchedule(\'' + dateStr + '\',' + dow + ')">';
+            html += '<span class="day-num">' + d + '</span>';
+            if (events) html += '<div class="day-events">' + events + '</div>';
+            html += '</div>';
+        }}
+
+        // Next month fill
+        const totalCells = startDow + daysInMonth;
+        const remaining = (7 - (totalCells % 7)) % 7;
+        for (let i = 1; i <= remaining; i++) {{
+            html += '<div class="cal-day other-month"><span class="day-num">' + i + '</span></div>';
+        }}
+
+        grid.innerHTML = html;
+    }}
+
+    function renderRecurring() {{
+        const el = document.getElementById('rec-days-list');
+        if (sessionDays.length === 0) {{
+            el.innerHTML = '<div style="color:var(--text-dim);padding:12px;font-size:13px">No recurring days configured</div>';
+            return;
+        }}
+        let html = '';
+        sessionDays.forEach((sd, i) => {{
+            html += '<div class="rec-day">';
+            html += '<span class="rec-name">' + (sd.name || WEEKDAYS[sd.weekday]) + '</span>';
+            html += '<span class="rec-time">' + String(sd.hour).padStart(2,'0') + ':00</span>';
+            html += '<span class="rec-post">post ' + sd.post_hours_before + 'h before</span>';
+            html += '<button class="btn btn-danger btn-sm" onclick="removeRecurring(' + i + ')">✖</button>';
+            html += '</div>';
+        }});
+        el.innerHTML = html;
+    }}
+
+    function openSchedule(dateStr, dow) {{
+        document.getElementById('modalDate').value = dateStr;
+        // Auto-fill name from weekday
+        document.getElementById('modalName').value = WEEKDAYS[dow] + ' Session';
+        // Default to 20:00
+        document.getElementById('modalHour').value = '20';
+        document.getElementById('modalMinute').value = '0';
+        document.getElementById('scheduleModal').classList.add('active');
+    }}
+
+    function closeModal(id) {{
+        document.getElementById(id).classList.remove('active');
+    }}
+
+    function scheduleSession() {{
+        const date = document.getElementById('modalDate').value;
+        const name = document.getElementById('modalName').value;
+        const hour = parseInt(document.getElementById('modalHour').value);
+        const minute = parseInt(document.getElementById('modalMinute').value);
+        if (!name) {{ alert('Please enter a session name'); return; }}
+
+        fetch('/api/schedule-session', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{ date, name, hour, minute }})
+        }}).then(r => r.json()).then(d => {{
+            if (d.ok) {{
+                closeModal('scheduleModal');
+                showToast('Session scheduled: ' + name + ' at ' + String(hour).padStart(2,'0') + ':' + String(minute).padStart(2,'0'));
+            }} else {{ alert(d.error || 'Failed to schedule'); }}
+        }});
+    }}
+
+    function openAddRecurring() {{
+        document.getElementById('recWeekday').value = '0';
+        document.getElementById('recHour').value = '20';
+        document.getElementById('recPostBefore').value = '12';
+        document.getElementById('recurringModal').classList.add('active');
+    }}
+
+    function addRecurring() {{
+        const weekday = parseInt(document.getElementById('recWeekday').value);
+        const hour = parseInt(document.getElementById('recHour').value);
+        const post_hours_before = parseInt(document.getElementById('recPostBefore').value);
+        const name = WEEKDAYS[weekday];
+
+        fetch('/api/session-days', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{ weekday, hour, name, post_hours_before }})
+        }}).then(r => r.json()).then(d => {{
+            if (d.ok) {{
+                sessionDays = d.days;
+                closeModal('recurringModal');
+                renderCalendar();
+                renderRecurring();
+                showToast('Added recurring: ' + name + ' at ' + String(hour).padStart(2,'0') + ':00');
+            }} else {{ alert(d.error || 'Failed'); }}
+        }});
+    }}
+
+    function removeRecurring(index) {{
+        if (!confirm('Remove this recurring day?')) return;
+        fetch('/api/session-days', {{
+            method: 'DELETE',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{ index }})
+        }}).then(r => r.json()).then(d => {{
+            if (d.ok) {{
+                sessionDays = d.days;
+                renderCalendar();
+                renderRecurring();
+                showToast('Recurring day removed');
+            }} else {{ alert(d.error || 'Failed'); }}
+        }});
+    }}
+
+    function showToast(msg) {{
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }}
+
+    init();
+    </script>"""
+
+    return web.Response(text=_page("Calendar", content, "calendar"), content_type="text/html")
 
 # ── API Endpoints ────────────────────────────────────────────────
 @routes.get("/api/logs")
@@ -655,6 +1026,88 @@ async def api_save_settings(request):
 async def api_status(request):
     """Health check endpoint."""
     return web.json_response({"status": "ok", "timestamp": datetime.now().isoformat()})
+
+# ── Calendar API Endpoints ─────────────────────────────────────
+@routes.post("/api/schedule-session")
+async def api_schedule_session(request):
+    """Create a one-off session on a specific date/time."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    data = await request.json()
+    date_str = data.get("date")  # YYYY-MM-DD
+    name = data.get("name", "Session")
+    hour = int(data.get("hour", 20))
+    minute = int(data.get("minute", 0))
+
+    if not date_str:
+        return web.json_response({"error": "date required"}, status=400)
+
+    create_fn = _state_getters.get("create_schedule")
+    if not create_fn or not bot_ref:
+        return web.json_response({"error": "Bot not ready"}, status=500)
+
+    try:
+        import pytz
+        EST = pytz.timezone("US/Eastern")
+        dt = datetime.strptime(f"{date_str} {hour:02d}:{minute:02d}", "%Y-%m-%d %H:%M")
+        dt = EST.localize(dt)
+
+        # Get the schedule channel
+        schedule_ch_id = _state_getters.get("schedule_channel_id", lambda: None)()
+        if not schedule_ch_id:
+            return web.json_response({"error": "Schedule channel not configured"}, status=500)
+
+        channel = await bot_ref.fetch_channel(int(schedule_ch_id))
+        await create_fn(channel, name, session_dt=dt)
+        await push_log(f"📅 Dashboard: Scheduled session '{name}' for {date_str} at {hour:02d}:{minute:02d}")
+        return web.json_response({"ok": True})
+    except Exception as e:
+        await push_log(f"❌ Dashboard schedule error: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+@routes.post("/api/session-days")
+async def api_add_session_day(request):
+    """Add a recurring session day."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    data = await request.json()
+    weekday = int(data.get("weekday", 0))
+    hour = int(data.get("hour", 20))
+    name = data.get("name", "Session")
+    post_hours_before = int(data.get("post_hours_before", 12))
+
+    new_day = {"weekday": weekday, "hour": hour, "name": name, "post_hours_before": post_hours_before}
+
+    session_days = list(_state_getters.get("session_days", lambda: [])())
+    session_days.append(new_day)
+
+    update_fn = _state_getters.get("update_settings")
+    if update_fn:
+        update_fn({"session_days": session_days})
+        await push_log(f"🔁 Dashboard: Added recurring day {name} at {hour:02d}:00")
+        return web.json_response({"ok": True, "days": session_days})
+    return web.json_response({"error": "Update not available"}, status=500)
+
+@routes.delete("/api/session-days")
+async def api_remove_session_day(request):
+    """Remove a recurring session day by index."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    data = await request.json()
+    index = int(data.get("index", -1))
+
+    session_days = list(_state_getters.get("session_days", lambda: [])())
+    if 0 <= index < len(session_days):
+        removed = session_days.pop(index)
+        update_fn = _state_getters.get("update_settings")
+        if update_fn:
+            update_fn({"session_days": session_days})
+            await push_log(f"🔁 Dashboard: Removed recurring day {removed.get('name', '?')}")
+            return web.json_response({"ok": True, "days": session_days})
+    return web.json_response({"error": "Invalid index"}, status=400)
 
 # ── Server Lifecycle ─────────────────────────────────────────────
 async def start_dashboard(bot):

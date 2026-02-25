@@ -2057,11 +2057,22 @@ async def weekly_summary():
 # Settings updater (for dashboard)
 # ----------------------------
 def update_settings(data):
-    global MAX_ATTENDING, CHECKIN_GRACE_MINUTES
+    global MAX_ATTENDING, CHECKIN_GRACE_MINUTES, NOSHOW_THRESHOLD
+    global admin_role_names, beta_role_names, archive_channel_id, session_days
     if "max_attending" in data:
         MAX_ATTENDING = int(data["max_attending"])
     if "checkin_grace" in data:
         CHECKIN_GRACE_MINUTES = int(data["checkin_grace"])
+    if "noshow_threshold" in data:
+        NOSHOW_THRESHOLD = int(data["noshow_threshold"])
+    if "admin_role_names" in data:
+        admin_role_names = [r.strip() for r in data["admin_role_names"] if r.strip()]
+    if "beta_role_names" in data:
+        beta_role_names = [r.strip() for r in data["beta_role_names"] if r.strip()]
+    if "archive_channel_id" in data:
+        archive_channel_id = int(data["archive_channel_id"])
+    if "session_days" in data:
+        session_days = data["session_days"]
     save_state()
 
 # ----------------------------
@@ -2112,8 +2123,11 @@ async def on_ready():
         "session_days":       lambda: session_days,
         "admin_role_names":   lambda: admin_role_names,
         "beta_role_names":    lambda: beta_role_names,
+        "archive_channel_id": lambda: archive_channel_id,
+        "schedule_channel_id": lambda: SCHEDULE_CHANNEL_ID,
         "save_history":       save_history,
         "update_settings":    update_settings,
+        "create_schedule":    create_schedule,
     })
     await dashboard.start_dashboard(bot)
 
