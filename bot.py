@@ -688,8 +688,10 @@ class OfferView(discord.ui.View):
 # Check-In View
 # ----------------------------
 class CheckInView(discord.ui.View):
-    def __init__(self):
+    """DM-based check-in button sent to each attending user individually."""
+    def __init__(self, user_id):
         super().__init__(timeout=None)
+        self.target_user_id = user_id
 
     @discord.ui.button(label="Check In", style=discord.ButtonStyle.success, emoji="🟢", custom_id="checkin_button")
     async def check_in(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -702,7 +704,14 @@ class CheckInView(discord.ui.View):
             return
         checked_in_ids.append(user.id)
         save_state()
-        await interaction.response.send_message(f"✅ {user.mention} checked in!", ephemeral=True)
+        # Disable the button after check-in
+        button.disabled = True
+        button.label = "Checked In ✅"
+        button.style = discord.ButtonStyle.secondary
+        await interaction.response.edit_message(
+            content="✅ **You're checked in!** See you in the session.",
+            view=self
+        )
 
 # ----------------------------
 # Swap View (DM)
@@ -1846,20 +1855,35 @@ async def checkin_manager():
         now = datetime.now(session_dt.tzinfo or EST)
         minutes_after = (now - session_dt).total_seconds() / 60
 
-        # At session start: post check-in button
+        # At session start: DM each attending user a check-in button
         if 0 <= minutes_after <= 2 and not checkin_active:
             checkin_active = True
+            dm_sent = 0
+            dm_failed = []
+            for uid in list(attending_ids):
+                try:
+                    user = await bot.fetch_user(uid)
+                    view = CheckInView(uid)
+                    await user.send(
+                        f"🟢 **Session is starting!** You have **{CHECKIN_GRACE_MINUTES} minutes** to check in.\n"
+                        f"Click the button below to confirm your attendance:",
+                        view=view
+                    )
+                    dm_sent += 1
+                except Exception as e:
+                    dm_failed.append(uid)
+                    print(f"❌ Could not DM user {uid}: {e}")
+
+            # Post a brief notice in the channel
             channel = await bot.fetch_channel(SCHEDULE_CHANNEL_ID)
             if channel:
-                checkin_view = CheckInView()
-                msg = await channel.send(
-                    f"🟢 **Session is starting!** Attendees, please check in below.\n"
-                    f"You have **{CHECKIN_GRACE_MINUTES} minutes** to check in or you'll be **auto-relieved**.",
-                    view=checkin_view
-                )
-                checkin_message_id = msg.id
-                save_state()
-                print("✅ Check-in posted")
+                notice = f"🟢 **Session is starting!** Check-in DMs sent to **{dm_sent}** attendee(s)."
+                if dm_failed:
+                    failed_mentions = ", ".join(f"<@{uid}>" for uid in dm_failed)
+                    notice += f"\n⚠️ Could not DM: {failed_mentions} — they may have DMs disabled."
+                await channel.send(notice)
+            save_state()
+            print(f"✅ Check-in DMs sent: {dm_sent} success, {len(dm_failed)} failed")
 
         # After grace period: auto-relieve no-shows
         if CHECKIN_GRACE_MINUTES <= minutes_after <= CHECKIN_GRACE_MINUTES + 2 and checkin_active:
