@@ -983,19 +983,25 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
         countdown_task.cancel()
         countdown_task = None
 
-    # Delete the old session message so people can't interact with it
+    # Strip buttons from the old session message (preserve for chat history)
     if event_message:
         try:
-            await event_message.delete()
+            old_embed = event_message.embeds[0] if event_message.embeds else build_embed()
+            old_embed.set_footer(text="🔴 Session closed — a new session has been created")
+            old_embed.color = 0x95a5a6  # gray out
+            await event_message.edit(embed=old_embed, view=None)
         except Exception:
             pass
         event_message = None
     elif event_message_id and event_channel_id:
-        # Fallback: fetch and delete by stored ID (e.g. after bot restart)
+        # Fallback: fetch and strip by stored ID (e.g. after bot restart)
         try:
             old_ch = await bot.fetch_channel(event_channel_id)
             old_msg = await old_ch.fetch_message(event_message_id)
-            await old_msg.delete()
+            old_embed = old_msg.embeds[0] if old_msg.embeds else discord.Embed(title="Session Closed")
+            old_embed.set_footer(text="🔴 Session closed — a new session has been created")
+            old_embed.color = 0x95a5a6
+            await old_msg.edit(embed=old_embed, view=None)
         except Exception:
             pass
 
