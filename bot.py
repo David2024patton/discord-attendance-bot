@@ -1473,15 +1473,29 @@ async def schedule(ctx, *args):
     await create_schedule(ctx.channel, f"Beta Led {sinfo['label']}", session_dt=session_dt, stype=stype)
     await ctx.send(f"✅ {sinfo['emoji']} **Beta Led {sinfo['label']}** scheduled for **{h12}{ampm} EST** today!", delete_after=10)
 
-@bot.command(help="Create a quick test session. Usage: !testsession [minutes] (default 1, admin only)")
-async def testsession(ctx, minutes: int = 1):
+@bot.command(help="Create a quick test session. Usage: !testsession [type] [minutes] (default 1 min, admin only)")
+async def testsession(ctx, *args):
+    """Create a quick test session. Admin only."""
     if not await check_admin(ctx):
         return
+
+    minutes = 1
+    stype = 'hunt'
+    
+    for arg in args:
+        try:
+            minutes = int(arg)
+        except ValueError:
+            lower = arg.lower()
+            if lower in SESSION_TYPES:
+                stype = lower
+
     if minutes < 1 or minutes > 120:
         await ctx.send("❌ Minutes must be between 1 and 120.", delete_after=5)
         return
+
     test_dt = datetime.now(EST) + timedelta(minutes=minutes)
-    await create_schedule(ctx.channel, f"Test Session ({minutes}min)", session_dt=test_dt)
+    await create_schedule(ctx.channel, f"Test Session ({minutes}min)", session_dt=test_dt, stype=stype)
 
 # ----------------------------
 # Force next session
