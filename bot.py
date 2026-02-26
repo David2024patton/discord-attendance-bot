@@ -2356,7 +2356,23 @@ def update_settings(data):
         if session_type != 'nesting':
             nest_parent_ids.clear()
             nest_baby_ids.clear()
+    
+    # Process nesting arrays when present
+    if "nest_parent_ids" in data:
+        nest_parent_ids.clear()
+        nest_parent_ids.extend([str(uid) for uid in data["nest_parent_ids"]])
+    if "nest_baby_ids" in data:
+        nest_baby_ids.clear()
+        nest_baby_ids.extend([str(uid) for uid in data["nest_baby_ids"]])
+        
     save_state()
+    # Force a refresh of the embed so it updates instantly
+    try:
+        loop = asyncio.get_running_loop()
+        if session_dt_str and not session_ended:
+            loop.create_task(refresh_open_embeds())
+    except:
+        pass
 
 # ----------------------------
 # Bot ready

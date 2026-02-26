@@ -620,6 +620,10 @@ async def settings_page(request):
     admin_roles_json = json.dumps(admin_roles or [])
     beta_roles_json = json.dumps(beta_roles or [])
     cur_session_type = g.get("session_type", lambda: "hunt")()
+    nest_parent_ids = g.get("nest_parent_ids", lambda: [])()
+    nest_baby_ids = g.get("nest_baby_ids", lambda: [])()
+    nest_parent_ids_json = json.dumps(nest_parent_ids or [])
+    nest_baby_ids_json = json.dumps(nest_baby_ids or [])
 
     days_html = ""
     for d in session_days:
@@ -676,6 +680,33 @@ async def settings_page(request):
                 <div style="margin-top:16px;text-align:right">
                     <button class="btn btn-primary" onclick="saveChannels()">Save Channels</button>
                 </div>
+            </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+            <div class="card-header">🥚 Nesting Night</div>
+            <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Configure parents and babies for the nesting session. These changes apply immediately to the active session.</p>
+            <div class="grid grid-2" style="gap:16px">
+                <div>
+                    <div class="setting-label">Parent(s)</div>
+                    <div class="setting-desc">Primary nest owners (usually 1 or 2)</div>
+                    <div style="display:flex;gap:6px;margin-top:8px">
+                        <select class="setting-input" id="nestParentSelect" style="flex:1;text-align:left"><option value="">-- Select Member --</option></select>
+                        <button class="btn btn-secondary" style="padding:0 12px" onclick="addNestingUser('parent')">Add</button>
+                    </div>
+                    <div id="nestParentsContainer" class="role-list" style="margin-top:8px;min-height:40px;align-content:flex-start"></div>
+                </div>
+                <div>
+                    <div class="setting-label">Babies</div>
+                    <div class="setting-desc">Users slotted to be nested</div>
+                    <div style="display:flex;gap:6px;margin-top:8px">
+                        <select class="setting-input" id="nestBabySelect" style="flex:1;text-align:left"><option value="">-- Select Member --</option></select>
+                        <button class="btn btn-secondary" style="padding:0 12px" onclick="addNestingUser('baby')">Add</button>
+                    </div>
+                    <div id="nestBabiesContainer" class="role-list" style="margin-top:8px;min-height:40px;align-content:flex-start"></div>
+                </div>
+            </div>
+            <div style="margin-top:16px;text-align:right">
+                <button class="btn btn-primary" onclick="saveNesting()">Save Nesting Role Updates</button>
             </div>
         </div>
         <div class="grid grid-2" style="margin-top:16px">
@@ -801,6 +832,96 @@ async def settings_page(request):
             }});
         }});
     }}
+
+    // === Nesting Roles Management ===
+    let _allMembers = [];
+    let _currentNestParents = {nest_parent_ids_json};
+    let _currentNestBabies = {nest_baby_ids_json};
+
+    fetch('/api/members').then(r => r.json()).then(d => {{
+        _allMembers = [];
+        const guilds = d.guilds || [];
+        guilds.forEach(g => {{
+            g.members.forEach(m => _allMembers.push(m));
+        }});
+        
+        populateMemberDropdown('nestParentSelect');
+        populateMemberDropdown('nestBabySelect');
+        
+        renderNestingChips('parent', 'nestParentsContainer', _currentNestParents);
+        renderNestingChips('baby', 'nestBabiesContainer', _currentNestBabies);
+    }});
+
+    function populateMemberDropdown(selectId) {{
+        const sel = document.getElementById(selectId);
+        sel.innerHTML = '<option value="">-- Select Member --</option>';
+        _allMembers.forEach(m => {{
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            opt.textContent = m.name;
+            sel.appendChild(opt);
+        }});
+    }}
+
+    function renderNestingChips(type, containerId, idList) {{
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        if (idList.length === 0) {{
+            container.innerHTML = '<span style="color:var(--text-dim);font-size:13px">No ' + (type === 'parent' ? 'parents' : 'babies') + ' configured</span>';
+            return;
+        }}
+        idList.forEach(id => {{
+            const member = _allMembers.find(m => m.id === String(id));
+            const name = member ? member.name : id;
+            
+            const chip = document.createElement('div');
+            chip.className = 'role-chip selected';
+            chip.style.display = 'flex';
+            chip.style.alignItems = 'center';
+            chip.style.gap = '6px';
+            
+            const emoji = type === 'parent' ? '🦕' : '🐣';
+            chip.innerHTML = '<span>' + emoji + ' ' + name + '</span> <span style="font-size:10px;opacity:0.6;background:rgba(0,0,0,0.2);border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;margin-left:4px" onclick="removeNestingUser(\\'' + type + '\\', \\'' + id + '\\', event)">✕</span>';
+            
+            container.appendChild(chip);
+        }});
+    }}
+
+    window.addNestingUser = function(type) {{
+        const selId = type === 'parent' ? 'nestParentSelect' : 'nestBabySelect';
+        const containerId = type === 'parent' ? 'nestParentsContainer' : 'nestBabiesContainer';
+        const list = type === 'parent' ? _currentNestParents : _currentNestBabies;
+        
+        const sel = document.getElementById(selId);
+        const id = sel.value;
+        if (!id) return;
+        
+        if (!list.includes(id)) {{
+            list.push(id);
+            renderNestingChips(type, containerId, list);
+        }}
+        sel.value = ''; // reset dropdown
+    }};
+
+    window.removeNestingUser = function(type, id, event) {{
+        if (event) event.stopPropagation();
+        const containerId = type === 'parent' ? 'nestParentsContainer' : 'nestBabiesContainer';
+        const list = type === 'parent' ? _currentNestParents : _currentNestBabies;
+        
+        const index = list.indexOf(String(id));
+        if (index > -1) {{
+            list.splice(index, 1);
+            renderNestingChips(type, containerId, list);
+        }}
+    }};
+
+    window.saveNesting = function() {{
+        _post('/api/settings', {{
+            nest_parent_ids: _currentNestParents,
+            nest_baby_ids: _currentNestBabies
+        }}, 'Nesting roles saved! (Applies instantly to active session)');
+    }};
+    // ================================
 
     function populateGuildDropdown(guildSelId, chSelId, currentChId) {{
         const gSel = document.getElementById(guildSelId);
@@ -1818,6 +1939,30 @@ async def api_roles(request):
                 "id": str(guild.id),
                 "name": guild.name,
                 "roles": guild_roles,
+            })
+    return web.json_response({"guilds": guilds})
+
+@routes.get("/api/members")
+async def api_members(request):
+    """Return list of members grouped by guild for user selectors."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    guilds = []
+    if bot_ref:
+        for guild in bot_ref.guilds:
+            guild_members = []
+            for member in sorted(guild.members, key=lambda m: m.display_name.lower()):
+                if member.bot:
+                    continue
+                guild_members.append({
+                    "name": member.display_name,
+                    "id": str(member.id),
+                })
+            guilds.append({
+                "id": str(guild.id),
+                "name": guild.name,
+                "members": guild_members,
             })
     return web.json_response({"guilds": guilds})
 
