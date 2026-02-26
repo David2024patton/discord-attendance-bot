@@ -2417,6 +2417,7 @@ async def days(ctx):
 # Dino Battle Minigame
 # ----------------------------
 DINOS_FILE = os.path.join(os.path.dirname(__file__), "dinos.json")
+DINO_LB_FILE = os.path.join(os.path.dirname(__file__), "dino_lb.json")
 
 DINO_TEMPLATES = [
     # Officials
@@ -2450,6 +2451,22 @@ def save_dinos(dinos_list):
             json.dump(dinos_list, f, indent=2)
     except Exception as e:
         print(f"❌ Error saving {DINOS_FILE}: {e}")
+
+def load_dino_lb():
+    if os.path.exists(DINO_LB_FILE):
+        try:
+            with open(DINO_LB_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"❌ Error loading {DINO_LB_FILE}: {e}")
+    return {}
+
+def save_dino_lb(lb_data):
+    try:
+        with open(DINO_LB_FILE, 'w') as f:
+            json.dump(lb_data, f, indent=2)
+    except Exception as e:
+        print(f"❌ Error saving {DINO_LB_FILE}: {e}")
 
 class DinoBattleView(discord.ui.View):
     def __init__(self, dino_a, dino_b):
@@ -2644,6 +2661,39 @@ async def dinobattle(ctx):
         )
         attachments = []
         
+    # --- Leaderboard Updates ---
+    lb = load_dino_lb()
+    all_bettors = view.bets_a.union(view.bets_b).union(view.bets_tie)
+    for u in all_bettors:
+        u_str = str(u)
+        if u_str not in lb:
+            lb[u_str] = {"wins": 0, "losses": 0, "ties": 0, "streak": 0, "best_streak": 0}
+            
+    if winner:
+        for u in all_bettors:
+            u_str = str(u)
+            if u in winning_bets:
+                lb[u_str]["wins"] += 1
+                lb[u_str]["streak"] = lb[u_str].get("streak", 0) + 1
+                if lb[u_str]["streak"] > lb[u_str].get("best_streak", 0):
+                    lb[u_str]["best_streak"] = lb[u_str]["streak"]
+            else:
+                lb[u_str]["losses"] += 1
+                lb[u_str]["streak"] = 0
+    else:
+        for u in all_bettors:
+            u_str = str(u)
+            if u in view.bets_tie:
+                lb[u_str]["wins"] += 1
+                lb[u_str]["streak"] = lb[u_str].get("streak", 0) + 1
+                if lb[u_str]["streak"] > lb[u_str].get("best_streak", 0):
+                    lb[u_str]["best_streak"] = lb[u_str]["streak"]
+            else:
+                lb[u_str]["ties"] += 1
+                lb[u_str]["streak"] = 0
+                
+    save_dino_lb(lb)
+
     win_embed.set_footer(text="Combat Mechanics powered by authentic Path of Titans formulas")
     
     if winning_bets:
@@ -2656,6 +2706,31 @@ async def dinobattle(ctx):
         await ctx.send(embed=win_embed, file=attachments[0])
     else:
         await ctx.send(embed=win_embed)
+
+@bot.command(help="Show the top bettors for Dino Battles.")
+async def dinostats(ctx):
+    lb = load_dino_lb()
+    if not lb:
+        await ctx.send("No Dino Battle bets on record yet!")
+        return
+
+    # Sort users by wins descending
+    sorted_lb = sorted(lb.items(), key=lambda x: x[1]['wins'], reverse=True)
+    
+    desc = []
+    for rank, (uid_str, stats) in enumerate(sorted_lb[:15]): # Top 15
+        user = await bot.fetch_user(int(uid_str))
+        name = user.display_name if user else f"User {uid_str}"
+        w, l, t = stats['wins'], stats['losses'], stats['ties']
+        s, bs = stats.get('streak', 0), stats.get('best_streak', 0)
+        desc.append(f"**#{rank+1}** {name} — **{w}** W / **{l}** L / **{t}** Ties | Streak: 🔥{s} (Best: {bs})")
+
+    embed = discord.Embed(
+        title="🦖 Dino Battle Leaderboard 🦕",
+        description="\n".join(desc),
+        color=0xf1c40f
+    )
+    await ctx.send(embed=embed)
 
 # ----------------------------
 # Custom Help Command
@@ -2703,14 +2778,19 @@ def _build_admin_embed():
 def _build_test_embed():
     """Build the Test commands help embed."""
     embed = discord.Embed(
-        title="🧪  Test Commands",
-        description="These commands are used for testing features without triggering standard long-duration events.",
+        title="🧪  Test & Fun Commands",
+        description="These commands are used for testing features without triggering standard long-duration events.\n\n"
+                    "**🌐 Web Dashboard & Setup**\n"
+                    "The admin UI is hosted locally at `http://localhost:8080/` (or your VPS IP). Use it to manage the Battle Roster and active Testing Sessions!",
         color=0xf1c40f,  # Yellow
     )
     embed.add_field(name="🧪  !testsession [minutes]", value="Create a quick test session (default 1 min). Example: `!testsession 3`", inline=False)
     embed.add_field(name="🧪  !testsession <type> [minutes]", value="Create a fast test of a specific type (`hunt`, `nesting`, `growth`, `pvp`, `migration`). Example: `!testsession nesting 5`", inline=False)
-    embed.set_footer(text="Page 3/3 · Testing only")
-    embed.set_footer(text="Page 2/2 · Admin only")
+    
+    embed.add_field(name="🦖  !dinobattle", value="Starts a lethal 1v1 (or 1vPack) Path of Titans simulation! Users have **60 seconds** to place interactive bets (`Win`, `Loss`, or `Tie`) before the carnage reveals the victor.", inline=False)
+    embed.add_field(name="🏆  !dinostats", value="Displays the Top 15 bettors by Win/Loss ratio and tracks current 🔥 Winning Streaks.", inline=False)
+    
+    embed.set_footer(text="Page 3/3 · Testing & Minigames")
     return embed
 
 class HelpView(discord.ui.View):
@@ -3138,6 +3218,7 @@ async def on_ready():
         "update_settings":    update_settings,
         "load_dinos":         load_dinos,
         "save_dinos":         save_dinos,
+        "load_dino_lb":       load_dino_lb,
         "create_schedule":    create_schedule,
     })
     await dashboard.start_dashboard(bot)
