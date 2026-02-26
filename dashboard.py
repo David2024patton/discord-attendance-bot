@@ -180,6 +180,13 @@ tr:hover td { background: var(--bg3); }
 .role-section-title:first-child { margin-top:0; }
 .role-list { max-height:200px; overflow-y:auto; padding:4px 0; }
 
+/* Tooltips */
+.help-tip { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: var(--border); color: var(--text-dim); font-size: 11px; cursor: help; margin-left: 8px; font-weight: bold; vertical-align: middle; user-select: none; }
+.help-tip:hover { background: var(--accent); color: white; }
+.help-content { visibility: hidden; opacity: 0; position: absolute; bottom: 125%; left: 50%; transform: translateX(-50%); background: var(--bg3); color: var(--text-bright); text-align: center; padding: 6px 12px; border-radius: 6px; font-size: 12px; width: max-content; max-width: 240px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 1000; transition: 0.2s; pointer-events: none; border: 1px solid var(--border); font-weight: normal; line-height: 1.4; white-space: normal; }
+.help-tip:hover .help-content { visibility: visible; opacity: 1; bottom: 135%; }
+.help-content::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border-width: 5px; border-style: solid; border-color: var(--bg3) transparent transparent transparent; }
+
 /* Mobile hamburger - hidden on desktop */
 .mobile-hamburger { display:none; }
 
@@ -696,7 +703,7 @@ async def battle_page(request):
     <div class="container">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <h2 style="color:var(--text-bright);margin:0">🦖 Dinosaur Roster ({len(all_dinos)})</h2>
-            <button class="btn btn-success" onclick="document.getElementById('uploadModal').classList.add('show')">+ Upload Card</button>
+            <button class="btn btn-success" onclick="document.getElementById('uploadModal').classList.add('active')">+ Upload Card</button>
         </div>
         
         <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));gap:16px">
@@ -705,57 +712,77 @@ async def battle_page(request):
     </div>
 
     <!-- Upload Modal -->
-    <div class="modal" id="uploadModal" onclick="if(event.target===this) this.classList.remove('show')">
-        <div class="modal-content" style="max-width:500px">
-            <h3>Upload Custom Dinosaur</h3>
-            <p style="color:var(--text-dim);margin-bottom:16px;font-size:13px">Create a custom creature. Ensure stats reflect authentic Path of Titans CW/Health scales (e.g., T-Rex CW=6500, Armor=1.0).</p>
+    <div class="modal-overlay" id="uploadModal">
+        <div class="modal" style="width:550px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0">Upload Custom Dinosaur</h3>
+                <button class="btn btn-secondary btn-sm" onclick="randomizeStats()" style="background:var(--accent);color:white;border:none" title="Generate authentic Path of Titans stats mapped to Diet">🎲 Random Stats</button>
+            </div>
+            <p style="color:var(--text-dim);margin-bottom:16px;font-size:13px;line-height:1.4">Create a custom creature. You can upload an optional Custom Frame and a Dino Photo. Ensure stats reflect authentic Path of Titans CW/Health scales.</p>
+            
             <form id="uploadForm" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label>Avatar PNG (512x512 recommended):</label>
-                    <input type="file" id="imageFile" name="image" accept="image/png" required style="width:100%;padding:8px;background:var(--bg-card);color:white;border:1px solid var(--border)">
+                <div class="grid grid-2" style="gap:12px;margin-bottom:12px">
+                    <div class="form-group">
+                        <label>Avatar / Dino Photo (PNG/JPG):</label>
+                        <input type="file" id="imageFile" name="image" accept="image/*" required style="width:100%;padding:7px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)">
+                    </div>
+                    <div class="form-group">
+                        <label>Custom Card Frame (Op. PNG):</label>
+                        <input type="file" id="frameFile" name="frame" accept="image/png" style="width:100%;padding:7px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)">
+                    </div>
                 </div>
+
                 <div class="grid grid-2" style="gap:12px">
                     <div class="form-group">
                         <label>ID (unique, no spaces):</label>
-                        <input type="text" id="dinoId" name="id" required placeholder="super_rex" pattern="[a-zA-Z0-9_]+">
+                        <input type="text" id="dinoId" name="id" required placeholder="super_rex" pattern="[a-zA-Z0-9_]+" style="width:100%">
                     </div>
                     <div class="form-group">
                         <label>Display Name:</label>
-                        <input type="text" id="dinoName" name="name" required placeholder="Super Rex">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Diet Type:</label>
-                    <select id="dinoType" name="type" required>
-                        <option value="carnivore">Carnivore</option>
-                        <option value="herbivore">Herbivore</option>
-                    </select>
-                </div>
-                <div class="grid grid-2" style="gap:12px">
-                    <div class="form-group">
-                        <label>Combat Weight (CW):</label>
-                        <input type="number" id="dinoCW" name="cw" required value="3000" min="100">
-                    </div>
-                    <div class="form-group">
-                        <label>Health (HP):</label>
-                        <input type="number" id="dinoHP" name="hp" required value="500" min="10">
-                    </div>
-                    <div class="form-group">
-                        <label>Attack Damage (ATK):</label>
-                        <input type="number" id="dinoATK" name="atk" required value="50" min="1">
-                    </div>
-                    <div class="form-group">
-                        <label>Armor (DEF multiplier):</label>
-                        <input type="number" id="dinoArmor" name="armor" step="0.1" required value="1.0" min="0.1">
-                    </div>
-                    <div class="form-group">
-                        <label>Speed (SPD initative):</label>
-                        <input type="number" id="dinoSPD" name="spd" required value="500" min="10">
+                        <input type="text" id="dinoName" name="name" required placeholder="Super Rex" style="width:100%">
                     </div>
                 </div>
                 
-                <div class="form-group" style="margin-top:16px;display:flex;gap:12px;justify-content:flex-end">
-                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('uploadModal').classList.remove('show')">Cancel</button>
+                <div class="form-group">
+                    <label>Diet Type:</label>
+                    <select id="dinoType" name="type" required style="width:100%">
+                        <option value="carnivore">Carnivore</option>
+                        <option value="herbivore">Herbivore</option>
+                        <option value="aquatic">Aquatic</option>
+                        <option value="flyer">Flyer</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Dino Lore / Description (Optional):</label>
+                    <textarea id="dinoLore" name="lore" rows="3" placeholder="Enter the backstory or details about this dinosaur..." style="width:100%;padding:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);font-family:inherit;resize:vertical"></textarea>
+                </div>
+
+                <div class="grid grid-2" style="gap:12px">
+                    <div class="form-group">
+                        <label>Combat Weight (CW):</label>
+                        <input type="number" id="dinoCW" name="cw" required value="3000" min="100" style="width:100%">
+                    </div>
+                    <div class="form-group">
+                        <label>Health (HP):</label>
+                        <input type="number" id="dinoHP" name="hp" required value="500" min="10" style="width:100%">
+                    </div>
+                    <div class="form-group">
+                        <label>Attack Damage (ATK):</label>
+                        <input type="number" id="dinoATK" name="atk" required value="50" min="1" style="width:100%">
+                    </div>
+                    <div class="form-group">
+                        <label>Armor (DEF multiplier):</label>
+                        <input type="number" id="dinoArmor" name="armor" step="0.1" required value="1.0" min="0.1" style="width:100%">
+                    </div>
+                    <div class="form-group">
+                        <label>Speed (SPD initative):</label>
+                        <input type="number" id="dinoSPD" name="spd" required value="500" min="10" style="width:100%">
+                    </div>
+                </div>
+                
+                <div class="modal-actions" style="margin-top:20px;display:flex;gap:12px;justify-content:flex-end">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('uploadModal').classList.remove('active')">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="uploadBtn">Save Card</button>
                 </div>
             </form>
@@ -763,6 +790,44 @@ async def battle_page(request):
     </div>
 
     <script>
+    function randomizeStats() {{
+        const diet = document.getElementById('dinoType').value;
+        let cw, hp, atk, armor, spd;
+        
+        // Authentic simulated Stat Generator based on Diet brackets
+        if (diet === 'carnivore') {{
+            cw = Math.floor(Math.random() * 4000) + 2500;
+            hp = Math.floor(cw / 6.5);
+            atk = Math.floor(Math.random() * 40) + 60;
+            armor = (Math.random() * 0.5 + 0.8).toFixed(1);
+            spd = Math.floor(Math.random() * 400) + 700;
+        }} else if (diet === 'herbivore') {{
+            cw = Math.floor(Math.random() * 5000) + 3500;
+            hp = Math.floor(cw / 5.5);
+            atk = Math.floor(Math.random() * 30) + 50;
+            armor = (Math.random() * 0.6 + 1.2).toFixed(1);
+            spd = Math.floor(Math.random() * 200) + 500;
+        }} else if (diet === 'aquatic') {{
+            cw = Math.floor(Math.random() * 5000) + 4000;
+            hp = Math.floor(cw / 6.0);
+            atk = Math.floor(Math.random() * 50) + 70;
+            armor = (Math.random() * 0.4 + 1.0).toFixed(1);
+            spd = Math.floor(Math.random() * 300) + 800;
+        }} else {{
+            cw = Math.floor(Math.random() * 1500) + 1000;
+            hp = Math.floor(cw / 4.0);
+            atk = Math.floor(Math.random() * 20) + 30;
+            armor = (Math.random() * 0.2 + 0.5).toFixed(1);
+            spd = Math.floor(Math.random() * 500) + 1000;
+        }}
+        
+        document.getElementById('dinoCW').value = cw;
+        document.getElementById('dinoHP').value = hp;
+        document.getElementById('dinoATK').value = atk;
+        document.getElementById('dinoArmor').value = armor;
+        document.getElementById('dinoSPD').value = spd;
+    }}
+
     document.getElementById('uploadForm').onsubmit = async (e) => {{
         e.preventDefault();
         const btn = document.getElementById('uploadBtn');
@@ -1353,16 +1418,20 @@ CALENDAR_CSS = """
 .gcal-side { width:260px; flex-shrink:0; }
 
 /* Kanban Layout */
-.kanban-board { display:flex; gap:12px; overflow-x:auto; padding-bottom:10px; min-height: 600px; }
-.kanban-col { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); min-width:240px; flex:1; display:flex; flex-direction:column; }
+.kanban-board { display:flex; gap:12px; overflow-x:auto; padding-bottom:15px; min-height: 600px; scroll-snap-type: x mandatory; scroll-behavior: smooth; }
+.kanban-board::-webkit-scrollbar { height: 8px; }
+.kanban-board::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.kanban-col { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); flex: 1 0 260px; min-width: 260px; display:flex; flex-direction:column; scroll-snap-align: start; }
 .kanban-header { padding:12px 10px; border-bottom:1px solid var(--border); font-weight:600; text-align:center; background:var(--bg2); border-radius:var(--radius) var(--radius) 0 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
 .kanban-cards { min-height:150px; padding:10px; display:flex; flex-direction:column; gap:10px; flex: 1; }
 .kanban-cards.drag-over { background:rgba(88,101,242,0.1); }
-.k-card { background:var(--bg2); border:1px solid var(--border); border-left:4px solid var(--accent); padding:12px; border-radius:6px; cursor:grab; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.1s; display:flex; flex-direction:column; gap:6px; }
+.k-card { position:relative; background:var(--bg2); border:1px solid var(--border); border-left:4px solid var(--accent); padding:12px; padding-right:24px; border-radius:6px; cursor:grab; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.1s; display:flex; flex-direction:column; gap:6px; }
 .k-card:hover { border-left-color: var(--green); transform: translateY(-2px); }
 .k-card:active { cursor:grabbing; }
 .k-title { font-weight: 600; font-size: 14px; color: var(--text-bright); }
 .k-time { font-size: 12px; color: var(--text-dim); }
+.k-edit-btn { position:absolute; top:8px; right:8px; font-size:12px; background:none; border:none; color:var(--text-dim); cursor:pointer; padding:2px; z-index:5; }
+.k-edit-btn:hover { color:var(--text-bright); }
 .k-add { padding:8px; margin:0 10px 10px; border:1px dashed var(--border); text-align:center; color:var(--text-dim); cursor:pointer; font-size:12px; font-weight:600; border-radius:6px; transition:0.2s; }
 .k-add:hover { background:rgba(255,255,255,0.05); color:var(--text-bright); border-color:var(--text-dim); }
 
@@ -1560,6 +1629,24 @@ async def calendar_page(request):
             </div>
         </div>
     </div>
+
+    <div class="modal-overlay" id="editRecurringModal">
+        <div class="modal">
+            <h3>Edit Recurring Card</h3>
+            <input type="hidden" id="editRecIndex" value="">
+            <label>Session Name</label>
+            <input type="text" id="editRecName" placeholder="e.g. Wednesday Raid">
+            <label>Session Hour (24h)</label>
+            <select id="editRecHour">{hour_options_full}</select>
+            <label>Post Hours Before</label>
+            <input type="number" id="editRecPostBefore" value="12" min="1" max="48">
+            <div class="modal-actions">
+                <button class="btn-secondary" onclick="closeModal('editRecurringModal')">Cancel</button>
+                <button class="btn btn-danger" onclick="deleteDraggedRecurring()">Delete</button>
+                <button class="btn btn-primary" onclick="saveEditRecurring()">Save Changes</button>
+            </div>
+        </div>
+    </div>
     """
 
     # JavaScript as a regular string (NOT f-string) to avoid backslash issues
@@ -1687,6 +1774,7 @@ async def calendar_page(request):
             sessionDays.forEach(function(sd, idx) {
                 if (sd.weekday === i) {
                     html += '<div class="k-card" draggable="true" ondragstart="handleDragStart(event, ' + idx + ')">';
+                    html += '<button class="k-edit-btn" onclick="openEditRecurring(event, '+idx+')">✏️</button>';
                     html += '<div class="k-title">' + (sd.name || 'Session') + '</div>';
                     html += '<div class="k-time">⏰ ' + String(sd.hour).padStart(2,'0') + ':00</div>';
                     html += '</div>';
@@ -1969,9 +2057,45 @@ async def calendar_page(request):
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.ok) {
                 sessionDays = d.days;
+                closeModal('editRecurringModal');
                 renderAll();
                 showToast('Recurring day removed');
             } else { alert(d.error || 'Failed'); }
+        });
+    }
+
+    function deleteDraggedRecurring() {
+        const idx = document.getElementById('editRecIndex').value;
+        if(idx !== "") removeRecurring(parseInt(idx));
+    }
+
+    function openEditRecurring(e, index) {
+        e.stopPropagation();
+        const sd = sessionDays[index];
+        document.getElementById('editRecIndex').value = index;
+        document.getElementById('editRecName').value = sd.name || ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][sd.weekday];
+        document.getElementById('editRecHour').value = String(sd.hour);
+        document.getElementById('editRecPostBefore').value = String(sd.post_hours_before || 12);
+        document.getElementById('editRecurringModal').classList.add('active');
+    }
+
+    function saveEditRecurring() {
+        const idx = parseInt(document.getElementById('editRecIndex').value);
+        const name = document.getElementById('editRecName').value;
+        const hour = parseInt(document.getElementById('editRecHour').value);
+        const post = parseInt(document.getElementById('editRecPostBefore').value);
+
+        fetch('/api/edit-recurring-day', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ index: idx, name: name, hour: hour, post_hours_before: post })
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) {
+                sessionDays = d.days;
+                closeModal('editRecurringModal');
+                renderAll();
+                showToast('Card updated successfully!');
+            } else { alert(d.error || 'Failed to update'); }
         });
     }
 
@@ -2131,6 +2255,42 @@ async def api_add_session_day(request):
         await push_log(f"🔁 Dashboard: Added recurring day {name} at {hour:02d}:00")
         return web.json_response({"ok": True, "days": session_days})
     return web.json_response({"error": "Update not available"}, status=500)
+
+@routes.post("/api/edit-recurring-day")
+async def api_edit_recurring_day(request):
+    """Edit an existing recurring session day."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+        
+    try:
+        data = await request.json()
+        idx_str = data.get("index")
+        if idx_str is None:
+            return web.json_response({"error": "index required"}, status=400)
+            
+        idx = int(idx_str)
+        name = data.get("name", "Session").strip()
+        hour = int(data.get("hour", 20))
+        post_hours_before = int(data.get("post_hours_before", 12))
+        
+        session_days = list(_state_getters.get("session_days", lambda: [])())
+        if idx < 0 or idx >= len(session_days):
+            return web.json_response({"error": "Invalid index"}, status=400)
+            
+        if name:
+            session_days[idx]["name"] = name
+        session_days[idx]["hour"] = hour
+        session_days[idx]["post_hours_before"] = post_hours_before
+        
+        update_fn = _state_getters.get("update_settings")
+        if update_fn:
+            update_fn({"session_days": session_days})
+            await push_log(f"🔁 Dashboard: Edited recurring day at index {idx} to '{name}'")
+            return web.json_response({"ok": True, "days": session_days})
+            
+        return web.json_response({"error": "Update function not found"}, status=500)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 @routes.delete("/api/session-days")
 async def api_remove_session_day(request):
@@ -2384,6 +2544,7 @@ async def api_upload_card(request):
     # Extract fields
     fields = {}
     image_data = None
+    frame_data = None
     
     while True:
         field = await reader.next()
@@ -2391,6 +2552,10 @@ async def api_upload_card(request):
             break
         if field.name == 'image':
             image_data = await field.read()
+        elif field.name == 'frame':
+            val = await field.read()
+            if val:
+                frame_data = val
         else:
             fields[field.name] = (await field.read()).decode('utf-8')
 
@@ -2410,11 +2575,24 @@ async def api_upload_card(request):
     except Exception as e:
         return web.json_response({"error": f"Failed to save image: {e}"}, status=500)
 
+    # Save Frame to assets/dinos/frames/id.png
+    if frame_data:
+        frames_dir = os.path.join(assets_dir, "frames")
+        os.makedirs(frames_dir, exist_ok=True)
+        frame_path = os.path.join(frames_dir, f"{dino_id}.png")
+        try:
+            with open(frame_path, 'wb') as f:
+                f.write(frame_data)
+            await push_log(f"🦖 Dashboard: Uploaded custom frame to {frame_path}")
+        except Exception as e:
+            return web.json_response({"error": f"Failed to save frame: {e}"}, status=500)
+
     # Load JSON, construct template, and save
     new_template = {
         "id": dino_id,
         "name": fields.get('name', 'Unknown'),
         "type": fields.get('type', 'carnivore'),
+        "lore": fields.get('lore', '').strip(),
         "cw": int(fields.get('cw', 3000)),
         "hp": int(fields.get('hp', 500)),
         "atk": int(fields.get('atk', 50)),

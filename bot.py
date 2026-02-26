@@ -1221,6 +1221,41 @@ def _render_vs_image(dino_a, dino_b):
             fill=bg_color, outline=CARD_OUTLINE, width=4
         )
         
+        # Check if custom frame exists
+        frame_exists = False
+        frame_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "frames", f"{dino['id']}.png")
+        if os.path.exists(frame_path):
+            frame_exists = True
+        
+        # Avatar
+        try:
+            avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino['id']}.png")
+            avatar = Image.open(avatar_path).convert("RGBA")
+            if frame_exists:
+                # Fill behind the frame area entirely
+                avatar = avatar.resize((CARD_WIDTH - 8, CARD_WIDTH - 8), Image.Resampling.LANCZOS)
+                img.paste(avatar, (x_offset + 4, PADDING + 10), avatar)
+            else:
+                # Classic Ellipse formatting
+                avatar = avatar.resize((200, 200), Image.Resampling.LANCZOS)
+                mask = Image.new("L", (200, 200), 0)
+                mask_draw = ImageDraw.Draw(mask)
+                mask_draw.ellipse((0, 0, 200, 200), fill=255)
+                img.paste(avatar, (x_offset + 50, PADDING + 60), mask)
+        except Exception:
+            # Fallback if image not found
+            draw.rectangle([(x_offset + 50, PADDING + 60), (x_offset + 250, PADDING + 260)], fill=(50, 50, 50))
+            draw.text((x_offset + 95, PADDING + 150), "No Image", fill=TEXT_COLOR, font=font_med)
+
+        # Custom Frame Overlay
+        if frame_exists:
+            try:
+                frame_img = Image.open(frame_path).convert("RGBA")
+                frame_img = frame_img.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.LANCZOS)
+                img.paste(frame_img, (x_offset, PADDING), frame_img)
+            except Exception:
+                pass
+
         # Name
         font_name = font_large
         name_bbox = draw.textbbox((0, 0), dino['name'], font=font_name)
@@ -1231,22 +1266,10 @@ def _render_vs_image(dino_a, dino_b):
             except OSError:
                 pass
         name_x = x_offset + (CARD_WIDTH - (name_bbox[2] - name_bbox[0])) // 2
+        # Use simple stroke by drawing text 4 times slightly offset
+        draw.text((name_x-1, PADDING + 14), dino['name'], fill=(0,0,0), font=font_name)
+        draw.text((name_x+1, PADDING + 16), dino['name'], fill=(0,0,0), font=font_name)
         draw.text((name_x, PADDING + 15), dino['name'], fill=TEXT_COLOR, font=font_name)
-
-        # Avatar
-        try:
-            avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino['id']}.png")
-            avatar = Image.open(avatar_path).convert("RGBA")
-            avatar = avatar.resize((200, 200), Image.Resampling.LANCZOS)
-            # Create a circular mask for the avatar
-            mask = Image.new("L", (200, 200), 0)
-            mask_draw = ImageDraw.Draw(mask)
-            mask_draw.ellipse((0, 0, 200, 200), fill=255)
-            img.paste(avatar, (x_offset + 50, PADDING + 60), mask)
-        except Exception:
-            # Fallback if image not found
-            draw.rectangle([(x_offset + 50, PADDING + 60), (x_offset + 250, PADDING + 260)], fill=(50, 50, 50))
-            draw.text((x_offset + 95, PADDING + 150), "No Image", fill=TEXT_COLOR, font=font_med)
 
         # Stats Table
         stats_y = PADDING + 270
@@ -1261,6 +1284,9 @@ def _render_vs_image(dino_a, dino_b):
         ]
         
         for label, val, color, max_val in stats:
+            # Stroke for legibility over frame
+            draw.text((x_offset + 19, stats_y-1), f"{label}:", fill=(0,0,0), font=font_med)
+            draw.text((x_offset + 21, stats_y+1), f"{label}:", fill=(0,0,0), font=font_med)
             draw.text((x_offset + 20, stats_y), f"{label}:", fill=TEXT_COLOR, font=font_med)
             
             # Stat bar background
@@ -1271,6 +1297,8 @@ def _render_vs_image(dino_a, dino_b):
             fill_width = min(130, int((float(val) / max_val) * 130))
             draw.rectangle([(bar_x, stats_y + 4), (bar_x + fill_width, stats_y + 20)], fill=color)
             
+            draw.text((bar_x + 134, stats_y-1), str(val), fill=(0,0,0), font=font_med)
+            draw.text((bar_x + 136, stats_y+1), str(val), fill=(0,0,0), font=font_med)
             draw.text((bar_x + 135, stats_y), str(val), fill=TEXT_COLOR, font=font_med)
             stats_y += stat_pad
 
