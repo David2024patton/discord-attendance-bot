@@ -2477,17 +2477,25 @@ class DinoBattleView(discord.ui.View):
         self.bets_b = set()
         self.bets_tie = set()
         
-        btn_a = discord.ui.Button(label=f"Bet on {dino_a['name']}", style=discord.ButtonStyle.danger if dino_a['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_a")
+        btn_a = discord.ui.Button(label=f"Bet on {dino_a['name']}", style=discord.ButtonStyle.danger if dino_a['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_a", row=0)
         btn_a.callback = self.bet_a_callback
         self.add_item(btn_a)
 
-        btn_tie = discord.ui.Button(label="Bet on Tie", style=discord.ButtonStyle.secondary, custom_id="bet_tie")
+        btn_tie = discord.ui.Button(label="Bet on Tie", style=discord.ButtonStyle.secondary, custom_id="bet_tie", row=0)
         btn_tie.callback = self.bet_tie_callback
         self.add_item(btn_tie)
 
-        btn_b = discord.ui.Button(label=f"Bet on {dino_b['name']}", style=discord.ButtonStyle.danger if dino_b['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_b")
+        btn_b = discord.ui.Button(label=f"Bet on {dino_b['name']}", style=discord.ButtonStyle.danger if dino_b['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_b", row=0)
         btn_b.callback = self.bet_b_callback
         self.add_item(btn_b)
+
+        btn_lb = discord.ui.Button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, custom_id="bet_lb", row=1)
+        btn_lb.callback = self.lb_callback
+        self.add_item(btn_lb)
+
+        btn_menu = discord.ui.Button(label="📚 Menu", style=discord.ButtonStyle.primary, custom_id="bet_menu", row=1)
+        btn_menu.callback = self.menu_callback
+        self.add_item(btn_menu)
 
     async def _handle_bet(self, interaction: discord.Interaction, target_set, other_sets, bet_name):
         user_id = interaction.user.id
@@ -2509,9 +2517,33 @@ class DinoBattleView(discord.ui.View):
     async def bet_b_callback(self, interaction: discord.Interaction):
         await self._handle_bet(interaction, self.bets_b, [self.bets_a, self.bets_tie], self.dino_b['name'])
 
+    async def lb_callback(self, interaction: discord.Interaction):
+        lb = load_dino_lb()
+        if not lb:
+            await interaction.response.send_message("No Dino Battle bets on record yet!", ephemeral=True)
+            return
+        sorted_lb = sorted(lb.items(), key=lambda x: x[1]['wins'], reverse=True)
+        desc = []
+        for rank, (uid_str, stats) in enumerate(sorted_lb[:15]):
+            user = await interaction.client.fetch_user(int(uid_str))
+            name = user.display_name if user else f"User {uid_str}"
+            w, l, t = stats['wins'], stats['losses'], stats['ties']
+            s, bs = stats.get('streak', 0), stats.get('best_streak', 0)
+            desc.append(f"**#{rank+1}** {name} — **{w}** W / **{l}** L / **{t}** Ties | Streak: 🔥{s} (Best: {bs})")
+        embed = discord.Embed(title="🦖 Dino Battle Leaderboard 🦕", description="\n".join(desc), color=0xf1c40f)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    async def menu_callback(self, interaction: discord.Interaction):
+        is_admin = False # Simplification
+        view = HelpView(interaction.user.id, show_admin=is_admin)
+        embed = _build_everyone_embed()
+        embed.set_footer(text="Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 @bot.command(help="Start a dinosaur battle! Users have 60s to bet.")
 async def dinobattle(ctx):
     import random
+    import time
     
     all_dinos = load_dinos()
     if len(all_dinos) < 2:
@@ -2550,10 +2582,12 @@ async def dinobattle(ctx):
     buf = _render_vs_image(dino_a, dino_b)
     file = discord.File(buf, filename="dinobattle.png")
     
+    end_time = int(time.time()) + 60
     embed = discord.Embed(
         title="🦖 DINOSAUR BATTLE! 🦕",
-        description="Two titans enter the arena! Review their Path of Titans stats and place your bets within **60 seconds**!\n"
-                    f"**{dino_a['name']}** vs **{dino_b['name']}**",
+        description=f"Two titans enter the arena! Review their Path of Titans stats and place your bets!\n\n"
+                    f"**{dino_a['name']}** vs **{dino_b['name']}**\n\n"
+                    f"⏳ **Betting closes <t:{end_time}:R>!**",
         color=0xe67e22
     )
     embed.set_image(url="attachment://dinobattle.png")
