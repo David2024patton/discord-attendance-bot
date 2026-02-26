@@ -2419,11 +2419,20 @@ async def days(ctx):
 DINOS_FILE = os.path.join(os.path.dirname(__file__), "dinos.json")
 
 DINO_TEMPLATES = [
+    # Officials
     {"id": "t_rex", "name": "T-Rex", "type": "carnivore", "cw": 6500, "hp": 800, "atk": 80, "armor": 1.0, "spd": 800},
-    {"id": "triceratops", "name": "Triceratops", "type": "herbivore", "cw": 5000, "hp": 700, "atk": 65, "armor": 1.2, "spd": 750},
-    {"id": "velociraptor", "name": "Velociraptor", "type": "carnivore", "cw": 1500, "hp": 300, "atk": 40, "armor": 1.0, "spd": 1100},
+    {"id": "triceratops", "name": "Eotriceratops", "type": "herbivore", "cw": 7000, "hp": 850, "atk": 75, "armor": 1.25, "spd": 700},
+    {"id": "velociraptor", "name": "Latenivenatrix", "type": "carnivore", "cw": 1000, "hp": 250, "atk": 35, "armor": 1.0, "spd": 1100},
     {"id": "stegosaurus", "name": "Stegosaurus", "type": "herbivore", "cw": 5500, "hp": 750, "atk": 70, "armor": 1.5, "spd": 600},
-    {"id": "spinosaurus", "name": "Spinosaurus", "type": "carnivore", "cw": 6500, "hp": 850, "atk": 85, "armor": 1.0, "spd": 700}
+    {"id": "spinosaurus", "name": "Spinosaurus", "type": "carnivore", "cw": 6500, "hp": 850, "atk": 85, "armor": 1.0, "spd": 700},
+    {"id": "megalania", "name": "Megalania", "type": "carnivore", "cw": 2800, "hp": 450, "atk": 50, "armor": 1.0, "spd": 850},
+    
+    # Modded
+    {"id": "argentinosaurus", "name": "Argentinosaurus (Mod)", "type": "herbivore", "cw": 25000, "hp": 3000, "atk": 250, "armor": 1.5, "spd": 400},
+    {"id": "deinosuchus", "name": "Deinosuchus (Mod)", "type": "carnivore", "cw": 8000, "hp": 900, "atk": 110, "armor": 1.1, "spd": 650},
+    {"id": "utahraptor", "name": "Utahraptor (Mod)", "type": "carnivore", "cw": 1800, "hp": 350, "atk": 45, "armor": 1.0, "spd": 1050},
+    {"id": "therizinosaurus", "name": "Therizinosaurus (Mod)", "type": "herbivore", "cw": 6000, "hp": 700, "atk": 120, "armor": 1.0, "spd": 850},
+    {"id": "carcharodontosaurus", "name": "Carcharodontosaurus (Mod)", "type": "carnivore", "cw": 6300, "hp": 750, "atk": 90, "armor": 1.0, "spd": 820}
 ]
 
 def load_dinos():
@@ -2444,69 +2453,89 @@ def save_dinos(dinos_list):
 
 class DinoBattleView(discord.ui.View):
     def __init__(self, dino_a, dino_b):
-        super().__init__(timeout=30) # Bets close in 30 seconds
+        super().__init__(timeout=60) # Bets close in 60 seconds
         self.dino_a = dino_a
         self.dino_b = dino_b
         self.bets_a = set()
         self.bets_b = set()
+        self.bets_tie = set()
         
         btn_a = discord.ui.Button(label=f"Bet on {dino_a['name']}", style=discord.ButtonStyle.danger if dino_a['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_a")
         btn_a.callback = self.bet_a_callback
         self.add_item(btn_a)
 
+        btn_tie = discord.ui.Button(label="Bet on Tie", style=discord.ButtonStyle.secondary, custom_id="bet_tie")
+        btn_tie.callback = self.bet_tie_callback
+        self.add_item(btn_tie)
+
         btn_b = discord.ui.Button(label=f"Bet on {dino_b['name']}", style=discord.ButtonStyle.danger if dino_b['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_b")
         btn_b.callback = self.bet_b_callback
         self.add_item(btn_b)
 
-    async def _handle_bet(self, interaction: discord.Interaction, target_set, other_set, dino_name):
+    async def _handle_bet(self, interaction: discord.Interaction, target_set, other_sets, bet_name):
         user_id = interaction.user.id
-        if user_id in other_set:
-            other_set.remove(user_id)
+        for s in other_sets:
+            if user_id in s:
+                s.remove(user_id)
         if user_id in target_set:
-            await interaction.response.send_message(f"You already bet on **{dino_name}**!", ephemeral=True)
+            await interaction.response.send_message(f"You already bet on **{bet_name}**!", ephemeral=True)
             return
         target_set.add(user_id)
-        await interaction.response.send_message(f"🎟️ Locked in your bet for **{dino_name}**!", ephemeral=True)
+        await interaction.response.send_message(f"🎟️ Locked in your bet for **{bet_name}**!", ephemeral=True)
 
     async def bet_a_callback(self, interaction: discord.Interaction):
-        await self._handle_bet(interaction, self.bets_a, self.bets_b, self.dino_a['name'])
+        await self._handle_bet(interaction, self.bets_a, [self.bets_b, self.bets_tie], self.dino_a['name'])
+
+    async def bet_tie_callback(self, interaction: discord.Interaction):
+        await self._handle_bet(interaction, self.bets_tie, [self.bets_a, self.bets_b], "Tie")
 
     async def bet_b_callback(self, interaction: discord.Interaction):
-        await self._handle_bet(interaction, self.bets_b, self.bets_a, self.dino_b['name'])
+        await self._handle_bet(interaction, self.bets_b, [self.bets_a, self.bets_tie], self.dino_b['name'])
 
-@bot.command(help="Start a dinosaur battle! Users have 30s to bet.")
+@bot.command(help="Start a dinosaur battle! Users have 60s to bet.")
 async def dinobattle(ctx):
     import random
     
-    # Load custom dinos or fall back to templates
     all_dinos = load_dinos()
     if len(all_dinos) < 2:
         await ctx.send("Not enough dinosaurs in the roster to battle. Need at least 2.")
         return
 
-    # Pick 2 distinct dinos (compare by overall dict to allow same species with different stats)
-    # To keep things simple and ensure visual uniqueness, we'll try to get 2 different names.
     dinos = random.sample(all_dinos, 2)
     dino_a = dict(dinos[0])
     dino_b = dict(dinos[1])
 
-    # Ensure authentic defaults if fields are missing from legacy saves
     for d in [dino_a, dino_b]:
         d.setdefault('cw', 3000)
         d.setdefault('hp', 500)
         d.setdefault('atk', 50)
         d.setdefault('armor', 1.0)
         d.setdefault('spd', 500)
+        d['pack_size'] = 1
+
+    # Pack Mechanics
+    cw_ratio = float(dino_a['cw']) / float(dino_b['cw'])
+    if cw_ratio > 3.0: # A is > 3x the size of B
+        pack = random.randint(3, 8)
+        dino_b['pack_size'] = pack
+        dino_b['name'] = f"Pack of {pack} {dino_b['name']}s"
+        dino_b['hp'] *= pack
+        dino_b['atk'] *= pack
+    elif cw_ratio < 0.33: # B is > 3x the size of A
+        pack = random.randint(3, 8)
+        dino_a['pack_size'] = pack
+        dino_a['name'] = f"Pack of {pack} {dino_a['name']}s"
+        dino_a['hp'] *= pack
+        dino_a['atk'] *= pack
 
     await ctx.send("⚔️ **Generating fighters...**")
     
-    # Generate image
     buf = _render_vs_image(dino_a, dino_b)
     file = discord.File(buf, filename="dinobattle.png")
     
     embed = discord.Embed(
         title="🦖 DINOSAUR BATTLE! 🦕",
-        description="Two titans enter the arena! Review their Path of Titans stats and place your bets within **30 seconds**!\n"
+        description="Two titans enter the arena! Review their Path of Titans stats and place your bets within **60 seconds**!\n"
                     f"**{dino_a['name']}** vs **{dino_b['name']}**",
         color=0xe67e22
     )
@@ -2515,73 +2544,106 @@ async def dinobattle(ctx):
     view = DinoBattleView(dino_a, dino_b)
     msg = await ctx.send(file=file, embed=embed, view=view)
     
-    # Wait for bets (countdown)
-    await asyncio.sleep(30)
+    # ----------------------------------------------------
+    # Stage 1: Wait for Bets (60 seconds)
+    # ----------------------------------------------------
+    await asyncio.sleep(60)
     
-    # Disable buttons
     for child in view.children:
         child.disabled = True
-    await msg.edit(view=view)
     
-    # --- Authentic Path of Titans Combat Resolution ---
-    # Formula: Damage = (Attacker CW / Defender CW) * Base Attack / Defender Armor
+    # ----------------------------------------------------
+    # Stage 2: Battle In Progress Animation
+    # ----------------------------------------------------
+    anim_path = os.path.join(os.path.dirname(__file__), "assets", "dino_claws.png")
+    if os.path.exists(anim_path):
+        anim_file = discord.File(anim_path, filename="claws.png")
+        embed.title = "⚔️ BATTLE IN PROGRESS... ⚔️"
+        embed.description = "The beasts are clashing! Who will emerge victorious?"
+        embed.color = 0xe74c3c
+        embed.set_image(url="attachment://claws.png")
+        try:
+            await msg.edit(embed=embed, view=view, attachments=[anim_file])
+        except:
+             await msg.edit(embed=embed, view=view)
+    else:
+        embed.title = "⚔️ BATTLE IN PROGRESS... ⚔️"
+        embed.description = "The beasts are clashing! Who will emerge victorious?"
+        embed.color = 0xe74c3c
+        embed.set_image(url="")
+        await msg.edit(embed=embed, view=view)
+
+    await asyncio.sleep(5)
+    
+    # ----------------------------------------------------
+    # Stage 3: Combat Resolution & Winner Reveal
+    # ----------------------------------------------------
     hp_a = float(dino_a['hp'])
     hp_b = float(dino_b['hp'])
     
     def calc_damage(attacker, defender):
         dmg = (float(attacker['cw']) / float(defender['cw'])) * float(attacker['atk'])
-        dmg = dmg / max(0.1, float(defender['armor'])) # Prevent division by zero
-        return max(1.0, dmg) # Minimum 1 damage
+        dmg = dmg / max(0.1, float(defender['armor']))
+        return max(1.0, dmg)
 
-    # Higher speed attacks first
-    turn_order = [dino_a, dino_b]
-    if float(dino_b['spd']) > float(dino_a['spd']):
-        turn_order = [dino_b, dino_a]
-    elif float(dino_b['spd']) == float(dino_a['spd']):
-        random.shuffle(turn_order) # Tie breaker
-
-    fighter1 = turn_order[0]
-    fighter2 = turn_order[1]
+    fighter1 = dino_a
+    fighter2 = dino_b
     
     hps = {fighter1['name']: float(fighter1['hp']), fighter2['name']: float(fighter2['hp'])}
     
     log = []
     round_count = 1
     
-    while hps[fighter1['name']] > 0 and hps[fighter2['name']] > 0 and round_count <= 20: # Cap at 20 rounds to prevent infinites
-        # Fighter 1 Attacks
+    # Simultaneous attacks
+    while hps[fighter1['name']] > 0 and hps[fighter2['name']] > 0 and round_count <= 20: 
         dmg1 = calc_damage(fighter1, fighter2)
-        hps[fighter2['name']] -= dmg1
-        log.append(f"**R{round_count}**: {fighter1['name']} hits for `{int(dmg1)}`! ({fighter2['name']} HP: `{max(0, int(hps[fighter2['name']]))}`)")
-        
-        if hps[fighter2['name']] <= 0:
-            break
-            
-        # Fighter 2 Attacks
         dmg2 = calc_damage(fighter2, fighter1)
-        hps[fighter1['name']] -= dmg2
-        log.append(f"**R{round_count}**: {fighter2['name']} retaliates for `{int(dmg2)}`! ({fighter1['name']} HP: `{max(0, int(hps[fighter1['name']]))}`)")
         
+        hps[fighter2['name']] -= dmg1
+        hps[fighter1['name']] -= dmg2
+        
+        log.append(f"**R{round_count}**: {fighter1['name']} deals `{int(dmg1)}` | {fighter2['name']} deals `{int(dmg2)}`")
         round_count += 1
 
-    if hps[fighter1['name']] > 0:
-        winner = fighter1
-        loser = fighter2
-    else:
+    winner = None
+    loser = None
+    if hps[fighter1['name']] <= 0 and hps[fighter2['name']] <= 0:
+        winner = None # Tie!
+    elif round_count > 20 and hps[fighter1['name']] > 0 and hps[fighter2['name']] > 0:
+        winner = None # Tie by stamina exhaustion
+    elif hps[fighter1['name']] <= 0:
         winner = fighter2
         loser = fighter1
-
-    if winner['name'] == dino_a['name']:
-        winning_bets = view.bets_a
     else:
-        winning_bets = view.bets_b
+        winner = fighter1
+        loser = fighter2
+
+    if winner:
+        winning_bets = view.bets_a if winner['name'] == dino_a['name'] else view.bets_b
         
-    # Announce winner
-    win_embed = discord.Embed(
-        title=f"🏆 The winner is... **{winner['name']}**!",
-        description="\n".join(log[-8:]), # Show last 8 lines of combat log
-        color=0x2ecc71
-    )
+        win_embed = discord.Embed(
+            title=f"🏆 The winner is... **{winner['name']}**!",
+            description="\n".join(log[-8:]), 
+            color=0x2ecc71
+        )
+        
+        # Try to show winner's face
+        winner_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{winner['id']}.png")
+        if os.path.exists(winner_path):
+            win_file = discord.File(winner_path, filename="winner.png")
+            win_embed.set_thumbnail(url="attachment://winner.png")
+            attachments = [win_file]
+        else:
+            attachments = []
+    else:
+        winning_bets = view.bets_tie
+        win_embed = discord.Embed(
+            title="⚖️ It's a TIE!",
+            description="Both titans collapsed, or fought to a standstill!\n\n" + "\n".join(log[-6:]), 
+            color=0x95a5a6
+        )
+        attachments = []
+        
     win_embed.set_footer(text="Combat Mechanics powered by authentic Path of Titans formulas")
     
     if winning_bets:
@@ -2590,7 +2652,10 @@ async def dinobattle(ctx):
     else:
         win_embed.add_field(name="📉 Bets", value="No one guessed correctly!", inline=False)
         
-    await ctx.send(embed=win_embed)
+    if attachments:
+        await ctx.send(embed=win_embed, file=attachments[0])
+    else:
+        await ctx.send(embed=win_embed)
 
 # ----------------------------
 # Custom Help Command
