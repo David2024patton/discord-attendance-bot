@@ -1051,9 +1051,50 @@ def _render_leaderboard_image(entries, clicker_id):
 class ScheduleView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.update_button_labels()
+
+    def update_button_labels(self):
+        # Index 0: Attend, 1: Standby, 2: Not Attending, 3: Relieve
+        attend_btn = self.children[0]
+        standby_btn = self.children[1]
+        decline_btn = self.children[2]
+        relieve_btn = self.children[3]
+
+        if session_type == 'nesting':
+            attend_btn.label = "Request Slot"
+            attend_btn.emoji = "🥚"
+            standby_btn.label = "Slot Standby"
+            decline_btn.label = "Not Nesting"
+            relieve_btn.label = "Relieve Slot"
+        elif session_type == 'growth':
+            attend_btn.label = "Join Growth"
+            attend_btn.emoji = "🌱"
+            standby_btn.label = "Standby"
+            decline_btn.label = "Skipping"
+            relieve_btn.label = "Relieve Spot"
+        elif session_type == 'pvp':
+            attend_btn.label = "Join Battle"
+            attend_btn.emoji = "⚔️"
+            standby_btn.label = "Standby"
+            decline_btn.label = "Retreating"
+            relieve_btn.label = "Relieve Spot"
+        elif session_type == 'migration':
+            attend_btn.label = "Join Herd"
+            attend_btn.emoji = "🏃"
+            standby_btn.label = "Standby"
+            decline_btn.label = "Staying Behind"
+            relieve_btn.label = "Relieve Spot"
+        else:
+            # Default (hunt)
+            attend_btn.label = "Join Hunt"
+            attend_btn.emoji = "🦴"
+            standby_btn.label = "Standby"
+            decline_btn.label = "Can't Make It"
+            relieve_btn.label = "Relieve Spot"
 
     async def update_embed(self):
         if event_message:
+            self.update_button_labels()
             await event_message.edit(embed=build_embed(), view=self)
 
     @discord.ui.button(label="Attend", style=discord.ButtonStyle.success, emoji="✅", custom_id="schedule_attend")
