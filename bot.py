@@ -1236,27 +1236,29 @@ def _render_vs_image(dino_a, dino_b):
             draw.text((x_offset + 95, PADDING + 150), "No Image", fill=TEXT_COLOR, font=font_med)
 
         # Stats Table
-        stats_y = PADDING + 280
-        stat_pad = 35
+        stats_y = PADDING + 270
+        stat_pad = 28
         
         stats = [
-            ("HP", dino['hp'], (46, 204, 113)),
-            ("ATK", dino['atk'], (231, 76, 60)),
-            ("DEF", dino['def'], (52, 152, 219)),
-            ("SPD", dino['spd'], (241, 196, 15))
+            ("CW", dino.get('cw', 3000), (155, 89, 182), 10000),  # Max CW ~10000
+            ("HP", dino.get('hp', 500), (46, 204, 113), 1500),    # Max HP ~1500
+            ("ATK", dino.get('atk', 50), (231, 76, 60), 200),     # Max ATK ~200
+            ("DEF", dino.get('armor', 1.0), (52, 152, 219), 3.0),   # Max Armor ~3.0
+            ("SPD", dino.get('spd', 500), (241, 196, 15), 1500)   # Max SPD ~1500
         ]
         
-        for label, val, color in stats:
-            draw.text((x_offset + 30, stats_y), f"{label}:", fill=TEXT_COLOR, font=font_med)
+        for label, val, color, max_val in stats:
+            draw.text((x_offset + 20, stats_y), f"{label}:", fill=TEXT_COLOR, font=font_med)
             
             # Stat bar background
-            bar_x = x_offset + 100
-            draw.rectangle([(bar_x, stats_y + 4), (bar_x + 150, stats_y + 20)], fill=(30, 30, 30))
-            # Stat bar fill (max roughly 150)
-            fill_width = min(150, int((val / 150) * 150))
+            bar_x = x_offset + 90
+            draw.rectangle([(bar_x, stats_y + 4), (bar_x + 130, stats_y + 20)], fill=(30, 30, 30))
+            
+            # Stat bar fill (max 130px)
+            fill_width = min(130, int((float(val) / max_val) * 130))
             draw.rectangle([(bar_x, stats_y + 4), (bar_x + fill_width, stats_y + 20)], fill=color)
             
-            draw.text((bar_x + 155, stats_y), str(val), fill=TEXT_COLOR, font=font_med)
+            draw.text((bar_x + 135, stats_y), str(val), fill=TEXT_COLOR, font=font_med)
             stats_y += stat_pad
 
     # Draw Card A
@@ -2414,13 +2416,31 @@ async def days(ctx):
 # ----------------------------
 # Dino Battle Minigame
 # ----------------------------
+DINOS_FILE = os.path.join(os.path.dirname(__file__), "dinos.json")
+
 DINO_TEMPLATES = [
-    {"id": "t_rex", "name": "T-Rex", "type": "carnivore"},
-    {"id": "triceratops", "name": "Triceratops", "type": "herbivore"},
-    {"id": "velociraptor", "name": "Velociraptor", "type": "carnivore"},
-    {"id": "stegosaurus", "name": "Stegosaurus", "type": "herbivore"},
-    {"id": "spinosaurus", "name": "Spinosaurus", "type": "carnivore"}
+    {"id": "t_rex", "name": "T-Rex", "type": "carnivore", "cw": 6500, "hp": 800, "atk": 80, "armor": 1.0, "spd": 800},
+    {"id": "triceratops", "name": "Triceratops", "type": "herbivore", "cw": 5000, "hp": 700, "atk": 65, "armor": 1.2, "spd": 750},
+    {"id": "velociraptor", "name": "Velociraptor", "type": "carnivore", "cw": 1500, "hp": 300, "atk": 40, "armor": 1.0, "spd": 1100},
+    {"id": "stegosaurus", "name": "Stegosaurus", "type": "herbivore", "cw": 5500, "hp": 750, "atk": 70, "armor": 1.5, "spd": 600},
+    {"id": "spinosaurus", "name": "Spinosaurus", "type": "carnivore", "cw": 6500, "hp": 850, "atk": 85, "armor": 1.0, "spd": 700}
 ]
+
+def load_dinos():
+    if os.path.exists(DINOS_FILE):
+        try:
+            with open(DINOS_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"❌ Error loading {DINOS_FILE}: {e}")
+    return DINO_TEMPLATES.copy()
+
+def save_dinos(dinos_list):
+    try:
+        with open(DINOS_FILE, 'w') as f:
+            json.dump(dinos_list, f, indent=2)
+    except Exception as e:
+        print(f"❌ Error saving {DINOS_FILE}: {e}")
 
 class DinoBattleView(discord.ui.View):
     def __init__(self, dino_a, dino_b):
@@ -2458,18 +2478,25 @@ class DinoBattleView(discord.ui.View):
 async def dinobattle(ctx):
     import random
     
-    # Pick 2 distinct dinos
-    dinos = random.sample(DINO_TEMPLATES, 2)
+    # Load custom dinos or fall back to templates
+    all_dinos = load_dinos()
+    if len(all_dinos) < 2:
+        await ctx.send("Not enough dinosaurs in the roster to battle. Need at least 2.")
+        return
+
+    # Pick 2 distinct dinos (compare by overall dict to allow same species with different stats)
+    # To keep things simple and ensure visual uniqueness, we'll try to get 2 different names.
+    dinos = random.sample(all_dinos, 2)
     dino_a = dict(dinos[0])
     dino_b = dict(dinos[1])
-    
-    # Generate random stats for this match
+
+    # Ensure authentic defaults if fields are missing from legacy saves
     for d in [dino_a, dino_b]:
-        d['hp'] = random.randint(80, 150)
-        d['atk'] = random.randint(30, 120)
-        d['def'] = random.randint(30, 120)
-        d['spd'] = random.randint(20, 100)
-        d['total'] = d['hp'] + d['atk'] + d['def'] + d['spd']
+        d.setdefault('cw', 3000)
+        d.setdefault('hp', 500)
+        d.setdefault('atk', 50)
+        d.setdefault('armor', 1.0)
+        d.setdefault('spd', 500)
 
     await ctx.send("⚔️ **Generating fighters...**")
     
@@ -2479,7 +2506,7 @@ async def dinobattle(ctx):
     
     embed = discord.Embed(
         title="🦖 DINOSAUR BATTLE! 🦕",
-        description="Two titans enter the arena! Review their stats and place your bets within **30 seconds**!\n"
+        description="Two titans enter the arena! Review their Path of Titans stats and place your bets within **30 seconds**!\n"
                     f"**{dino_a['name']}** vs **{dino_b['name']}**",
         color=0xe67e22
     )
@@ -2496,29 +2523,72 @@ async def dinobattle(ctx):
         child.disabled = True
     await msg.edit(view=view)
     
-    # Determine winner based on weighted stats
-    total_power = dino_a['total'] + dino_b['total']
-    roll = random.uniform(0, total_power)
+    # --- Authentic Path of Titans Combat Resolution ---
+    # Formula: Damage = (Attacker CW / Defender CW) * Base Attack / Defender Armor
+    hp_a = float(dino_a['hp'])
+    hp_b = float(dino_b['hp'])
     
-    if roll <= dino_a['total']:
-        winner = dino_a
+    def calc_damage(attacker, defender):
+        dmg = (float(attacker['cw']) / float(defender['cw'])) * float(attacker['atk'])
+        dmg = dmg / max(0.1, float(defender['armor'])) # Prevent division by zero
+        return max(1.0, dmg) # Minimum 1 damage
+
+    # Higher speed attacks first
+    turn_order = [dino_a, dino_b]
+    if float(dino_b['spd']) > float(dino_a['spd']):
+        turn_order = [dino_b, dino_a]
+    elif float(dino_b['spd']) == float(dino_a['spd']):
+        random.shuffle(turn_order) # Tie breaker
+
+    fighter1 = turn_order[0]
+    fighter2 = turn_order[1]
+    
+    hps = {fighter1['name']: float(fighter1['hp']), fighter2['name']: float(fighter2['hp'])}
+    
+    log = []
+    round_count = 1
+    
+    while hps[fighter1['name']] > 0 and hps[fighter2['name']] > 0 and round_count <= 20: # Cap at 20 rounds to prevent infinites
+        # Fighter 1 Attacks
+        dmg1 = calc_damage(fighter1, fighter2)
+        hps[fighter2['name']] -= dmg1
+        log.append(f"**R{round_count}**: {fighter1['name']} hits for `{int(dmg1)}`! ({fighter2['name']} HP: `{max(0, int(hps[fighter2['name']]))}`)")
+        
+        if hps[fighter2['name']] <= 0:
+            break
+            
+        # Fighter 2 Attacks
+        dmg2 = calc_damage(fighter2, fighter1)
+        hps[fighter1['name']] -= dmg2
+        log.append(f"**R{round_count}**: {fighter2['name']} retaliates for `{int(dmg2)}`! ({fighter1['name']} HP: `{max(0, int(hps[fighter1['name']]))}`)")
+        
+        round_count += 1
+
+    if hps[fighter1['name']] > 0:
+        winner = fighter1
+        loser = fighter2
+    else:
+        winner = fighter2
+        loser = fighter1
+
+    if winner['name'] == dino_a['name']:
         winning_bets = view.bets_a
     else:
-        winner = dino_b
         winning_bets = view.bets_b
         
     # Announce winner
     win_embed = discord.Embed(
         title=f"🏆 The winner is... **{winner['name']}**!",
-        description=f"{winner['name']} won the battle with a total power score of {winner['total']}!",
+        description="\n".join(log[-8:]), # Show last 8 lines of combat log
         color=0x2ecc71
     )
+    win_embed.set_footer(text="Combat Mechanics powered by authentic Path of Titans formulas")
     
     if winning_bets:
         mentions = " ".join([f"<@{uid}>" for uid in winning_bets])
-        win_embed.add_field(name="🎉 Winning Bets!", value=mentions)
+        win_embed.add_field(name="🎉 Winning Bets!", value=mentions, inline=False)
     else:
-        win_embed.add_field(name="📉 Bets", value="No one guessed correctly!")
+        win_embed.add_field(name="📉 Bets", value="No one guessed correctly!", inline=False)
         
     await ctx.send(embed=win_embed)
 
@@ -2573,7 +2643,7 @@ def _build_test_embed():
         color=0xf1c40f,  # Yellow
     )
     embed.add_field(name="🧪  !testsession [minutes]", value="Create a quick test session (default 1 min). Example: `!testsession 3`", inline=False)
-    embed.add_field(name="🧪  !testsession <type> [minutes]", value="Create a quick test session for a specific type. Example: `!testsession nesting 5`", inline=False)
+    embed.add_field(name="🧪  !testsession <type> [minutes]", value="Create a fast test of a specific type (`hunt`, `nesting`, `growth`, `pvp`, `migration`). Example: `!testsession nesting 5`", inline=False)
     embed.set_footer(text="Page 3/3 · Testing only")
     embed.set_footer(text="Page 2/2 · Admin only")
     return embed
@@ -3001,6 +3071,8 @@ async def on_ready():
         "nest_baby_ids":       lambda: nest_baby_ids,
         "save_history":       save_history,
         "update_settings":    update_settings,
+        "load_dinos":         load_dinos,
+        "save_dinos":         save_dinos,
         "create_schedule":    create_schedule,
     })
     await dashboard.start_dashboard(bot)

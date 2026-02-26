@@ -303,6 +303,7 @@ def _sidebar(active="home"):
             <a href="/calendar" class="{cls('calendar')}"><span class="icon">📅</span><span class="label">Calendar</span></a>
             <a href="/users" class="{cls('users')}"><span class="icon">👥</span><span class="label">Users</span></a>
             <a href="/logs" class="{cls('logs')}"><span class="icon">📋</span><span class="label">Logs</span></a>
+            <a href="/battle" class="{cls('battle')}"><span class="icon">🦖</span><span class="label">Battle</span></a>
             <a href="/settings" class="{cls('settings')}"><span class="icon">⚙️</span><span class="label">Settings</span></a>
         </nav>
         <div class="sidebar-footer">
@@ -594,6 +595,163 @@ async def logs_page(request):
     </script>"""
 
     return web.Response(text=_page("Logs", content, "logs"), content_type="text/html")
+
+# ── Battle Cards Page ────────────────────────────────────────────
+@routes.get("/battle")
+async def battle_page(request):
+    if not _check_auth(request):
+        raise web.HTTPFound("/login")
+
+    load_dinos = _state_getters.get("load_dinos")
+    if load_dinos:
+        all_dinos = load_dinos()
+    else:
+        all_dinos = []
+
+    cards_html = ""
+    for d in all_dinos:
+        bg_col = "var(--red)" if d['type'] == 'carnivore' else "var(--green)"
+        safe_name = str(d['name']).replace('"', '&quot;')
+        safe_id = str(d['id']).replace('"', '&quot;')
+        
+        cards_html += f"""
+        <div class="card" style="border-top:3px solid {bg_col};position:relative">
+            <button class="btn btn-danger btn-sm" style="position:absolute;top:8px;right:8px;padding:2px 8px" onclick="deleteCard('{safe_id}', '{safe_name}')">X</button>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="font-weight:bold;font-size:16px;">{safe_name}</div>
+                <div class="badge badge-orange">{d['type'].upper()}</div>
+            </div>
+            <div style="color:var(--text-dim);font-size:12px">ID: {safe_id}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+                <div>💥 CW: <strong style="color:var(--text-bright)">{d.get('cw', 3000)}</strong></div>
+                <div>❤️ HP: <strong style="color:var(--green)">{d.get('hp', 500)}</strong></div>
+                <div>⚔️ ATK: <strong style="color:var(--red)">{d.get('atk', 50)}</strong></div>
+                <div>🛡️ DEF: <strong style="color:var(--blue)">{d.get('armor', 1.0)}</strong></div>
+                <div>⚡ SPD: <strong style="color:#f1c40f">{d.get('spd', 500)}</strong></div>
+            </div>
+        </div>
+        """
+
+    if not cards_html:
+        cards_html = '<div style="color:var(--text-dim);width:100%;text-align:center">No cards found. Upload one below.</div>'
+
+    content = f"""
+    <div class="container">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h2 style="color:var(--text-bright);margin:0">🦖 Dinosaur Roster ({len(all_dinos)})</h2>
+            <button class="btn btn-success" onclick="document.getElementById('uploadModal').classList.add('show')">+ Upload Card</button>
+        </div>
+        
+        <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));gap:16px">
+            {cards_html}
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div class="modal" id="uploadModal" onclick="if(event.target===this) this.classList.remove('show')">
+        <div class="modal-content" style="max-width:500px">
+            <h3>Upload Custom Dinosaur</h3>
+            <p style="color:var(--text-dim);margin-bottom:16px;font-size:13px">Create a custom creature. Ensure stats reflect authentic Path of Titans CW/Health scales (e.g., T-Rex CW=6500, Armor=1.0).</p>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>Avatar PNG (512x512 recommended):</label>
+                    <input type="file" id="imageFile" name="image" accept="image/png" required style="width:100%;padding:8px;background:var(--bg-card);color:white;border:1px solid var(--border)">
+                </div>
+                <div class="grid grid-2" style="gap:12px">
+                    <div class="form-group">
+                        <label>ID (unique, no spaces):</label>
+                        <input type="text" id="dinoId" name="id" required placeholder="super_rex" pattern="[a-zA-Z0-9_]+">
+                    </div>
+                    <div class="form-group">
+                        <label>Display Name:</label>
+                        <input type="text" id="dinoName" name="name" required placeholder="Super Rex">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Diet Type:</label>
+                    <select id="dinoType" name="type" required>
+                        <option value="carnivore">Carnivore</option>
+                        <option value="herbivore">Herbivore</option>
+                    </select>
+                </div>
+                <div class="grid grid-2" style="gap:12px">
+                    <div class="form-group">
+                        <label>Combat Weight (CW):</label>
+                        <input type="number" id="dinoCW" name="cw" required value="3000" min="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Health (HP):</label>
+                        <input type="number" id="dinoHP" name="hp" required value="500" min="10">
+                    </div>
+                    <div class="form-group">
+                        <label>Attack Damage (ATK):</label>
+                        <input type="number" id="dinoATK" name="atk" required value="50" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Armor (DEF multiplier):</label>
+                        <input type="number" id="dinoArmor" name="armor" step="0.1" required value="1.0" min="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Speed (SPD initative):</label>
+                        <input type="number" id="dinoSPD" name="spd" required value="500" min="10">
+                    </div>
+                </div>
+                
+                <div class="form-group" style="margin-top:16px;display:flex;gap:12px;justify-content:flex-end">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('uploadModal').classList.remove('show')">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="uploadBtn">Save Card</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    document.getElementById('uploadForm').onsubmit = async (e) => {{
+        e.preventDefault();
+        const btn = document.getElementById('uploadBtn');
+        btn.disabled = true;
+        btn.textContent = "Uploading...";
+        
+        try {{
+            const formData = new FormData(e.target);
+            const r = await fetch('/api/upload-card', {{
+                method: 'POST',
+                body: formData
+            }});
+            const data = await r.json();
+            if(data.ok) {{
+                showToast("Card uploaded successfully!");
+                location.reload();
+            }} else {{
+                alert("Error: " + data.error);
+                btn.disabled = false;
+                btn.textContent = "Save Card";
+            }}
+        }} catch(err) {{
+            alert(err);
+            btn.disabled = false;
+            btn.textContent = "Save Card";
+        }}
+    }};
+
+    function deleteCard(id, name) {{
+        if(!confirm("Delete " + name + " (ID: " + id + ")? This cannot be undone.")) return;
+        fetch('/api/delete-card', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{id: id}})
+        }}).then(r=>r.json()).then(d=>{{
+            if(d.ok) {{
+                showToast("Deleted " + name);
+                location.reload();
+            }} else {{
+                alert(d.error);
+            }}
+        }});
+    }}
+    </script>
+    """
+    return web.Response(text=_page("Battle Cards", content, "battle"), content_type="text/html")
 
 # ── Settings Page ────────────────────────────────────────────────
 @routes.get("/settings")
@@ -2146,6 +2304,120 @@ async def api_test_status_msg(request):
     except Exception as e:
         await push_log(f"❌ Test status message error: {e}")
         return web.json_response({"error": str(e)}, status=500)
+
+@routes.post("/api/upload-card")
+async def api_upload_card(request):
+    """Handle multipart avatar uploads and new stat generation."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    import os
+    reader = await request.multipart()
+    
+    # Extract fields
+    fields = {}
+    image_data = None
+    
+    while True:
+        field = await reader.next()
+        if field is None:
+            break
+        if field.name == 'image':
+            image_data = await field.read()
+        else:
+            fields[field.name] = (await field.read()).decode('utf-8')
+
+    dino_id = fields.get('id', '').strip()
+    if not dino_id or not image_data:
+        return web.json_response({"error": "Missing ID or Image file."}, status=400)
+
+    # Save Image to assets/dinos/id.png
+    assets_dir = os.path.join(os.path.dirname(__file__), "assets", "dinos")
+    os.makedirs(assets_dir, exist_ok=True)
+    img_path = os.path.join(assets_dir, f"{dino_id}.png")
+    
+    try:
+        with open(img_path, 'wb') as f:
+            f.write(image_data)
+        await push_log(f"🦖 Dashboard: Uploaded new avatar to {img_path}")
+    except Exception as e:
+        return web.json_response({"error": f"Failed to save image: {e}"}, status=500)
+
+    # Load JSON, construct template, and save
+    new_template = {
+        "id": dino_id,
+        "name": fields.get('name', 'Unknown'),
+        "type": fields.get('type', 'carnivore'),
+        "cw": int(fields.get('cw', 3000)),
+        "hp": int(fields.get('hp', 500)),
+        "atk": int(fields.get('atk', 50)),
+        "armor": float(fields.get('armor', 1.0)),
+        "spd": int(fields.get('spd', 500))
+    }
+
+    load_dinos = _state_getters.get("load_dinos")
+    save_dinos = _state_getters.get("save_dinos")
+    
+    if load_dinos and save_dinos:
+        all_dinos = load_dinos()
+        
+        # Check if updating existing
+        replaced = False
+        for i, d in enumerate(all_dinos):
+            if d['id'] == dino_id:
+                all_dinos[i] = new_template
+                replaced = True
+                break
+                
+        if not replaced:
+            all_dinos.append(new_template)
+            
+        save_dinos(all_dinos)
+        await push_log(f"🦖 Dashboard: Registered stats for {new_template['name']} ({dino_id})")
+        
+    return web.json_response({"ok": True})
+
+@routes.post("/api/delete-card")
+async def api_delete_card(request):
+    """Delete a custom card from the roster."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    import os
+    data = await request.json()
+    dino_id = data.get("id")
+    
+    if not dino_id:
+        return web.json_response({"error": "Missing ID."}, status=400)
+
+    load_dinos = _state_getters.get("load_dinos")
+    save_dinos = _state_getters.get("save_dinos")
+    
+    if load_dinos and save_dinos:
+        all_dinos = load_dinos()
+        new_dinos = [d for d in all_dinos if d['id'] != dino_id]
+        
+        if len(new_dinos) == len(all_dinos):
+             return web.json_response({"error": "ID not found."}, status=404)
+        
+        # Don't let them crash the bot by deleting below 2.
+        if len(new_dinos) < 2:
+            return web.json_response({"error": "Cannot drop below 2 fighters."}, status=400)
+
+        save_dinos(new_dinos)
+        
+        # Attempt to delete the image file, but don't hard fail if it's missing or locked
+        img_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino_id}.png")
+        if os.path.exists(img_path):
+            try:
+                os.remove(img_path)
+            except:
+                pass
+                
+        await push_log(f"🦖 Dashboard: Deleted card ID {dino_id}")
+        return web.json_response({"ok": True})
+        
+    return web.json_response({"error": "Bot state error."}, status=500)
 
 # ── Server Lifecycle ─────────────────────────────────────────────
 async def start_dashboard(bot):
