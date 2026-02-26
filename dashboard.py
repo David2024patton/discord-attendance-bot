@@ -809,6 +809,7 @@ async def settings_page(request):
                         <li><strong>!leaderboard [type]</strong><br><span style="color:var(--text-dim)">View server attendance leaderboard.</span></li>
                         <li><strong>!help</strong><br><span style="color:var(--text-dim)">Get a link to the help menu.</span></li>
                         <li><strong>!nest</strong><br><span style="color:var(--text-dim)">Show the current setup of the nesting session (if active).</span></li>
+                        <li><strong>!dinobattle</strong><br><span style="color:var(--text-dim)">Start a Pokémon-style random dinosaur card battle!</span></li>
                     </ul>
                 </div>
                 <div class="card" style="border-top: 3px solid var(--red)">

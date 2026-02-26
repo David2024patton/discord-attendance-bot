@@ -1179,6 +1179,103 @@ def _render_nesting_leaderboard_image(entries, clicker_id):
     return buf
 
 # ----------------------------
+# Dino Battle Image Renderer
+# ----------------------------
+def _render_vs_image(dino_a, dino_b):
+    """Render a side-by-side trading card battle image. Returns a BytesIO object."""
+    CARD_WIDTH = 300
+    CARD_HEIGHT = 450
+    PADDING = 40
+    VS_SIZE = 100
+    TOTAL_WIDTH = (CARD_WIDTH * 2) + (PADDING * 3)
+    TOTAL_HEIGHT = CARD_HEIGHT + (PADDING * 2)
+
+    BG_COLOR = (20, 22, 25)
+    CARD_BG_A = (88, 28, 28) if dino_a['type'] == 'carnivore' else (28, 88, 48)
+    CARD_BG_B = (88, 28, 28) if dino_b['type'] == 'carnivore' else (28, 88, 48)
+    CARD_OUTLINE = (241, 196, 15)
+    TEXT_COLOR = (255, 255, 255)
+
+    img = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    try:
+        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
+        font_med = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        font_vs = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+    except OSError:
+        font_large = ImageFont.load_default()
+        font_med = ImageFont.load_default()
+        font_vs = ImageFont.load_default()
+
+    def draw_card(x_offset, bg_color, dino):
+        # Card Background
+        draw.rectangle(
+            [(x_offset, PADDING), (x_offset + CARD_WIDTH, PADDING + CARD_HEIGHT)],
+            fill=bg_color, outline=CARD_OUTLINE, width=4
+        )
+        
+        # Name
+        name_bbox = draw.textbbox((0, 0), dino['name'], font=font_large)
+        name_x = x_offset + (CARD_WIDTH - (name_bbox[2] - name_bbox[0])) // 2
+        draw.text((name_x, PADDING + 15), dino['name'], fill=TEXT_COLOR, font=font_large)
+
+        # Avatar
+        try:
+            avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino['id']}.png")
+            avatar = Image.open(avatar_path).convert("RGBA")
+            avatar = avatar.resize((200, 200), Image.Resampling.LANCZOS)
+            # Create a circular mask for the avatar
+            mask = Image.new("L", (200, 200), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.ellipse((0, 0, 200, 200), fill=255)
+            img.paste(avatar, (x_offset + 50, PADDING + 60), mask)
+        except Exception:
+            # Fallback if image not found
+            draw.rectangle([(x_offset + 50, PADDING + 60), (x_offset + 250, PADDING + 260)], fill=(50, 50, 50))
+            draw.text((x_offset + 95, PADDING + 150), "No Image", fill=TEXT_COLOR, font=font_med)
+
+        # Stats Table
+        stats_y = PADDING + 280
+        stat_pad = 35
+        
+        stats = [
+            ("HP", dino['hp'], (46, 204, 113)),
+            ("ATK", dino['atk'], (231, 76, 60)),
+            ("DEF", dino['def'], (52, 152, 219)),
+            ("SPD", dino['spd'], (241, 196, 15))
+        ]
+        
+        for label, val, color in stats:
+            draw.text((x_offset + 30, stats_y), f"{label}:", fill=TEXT_COLOR, font=font_med)
+            
+            # Stat bar background
+            bar_x = x_offset + 100
+            draw.rectangle([(bar_x, stats_y + 4), (bar_x + 150, stats_y + 20)], fill=(30, 30, 30))
+            # Stat bar fill (max roughly 150)
+            fill_width = min(150, int((val / 150) * 150))
+            draw.rectangle([(bar_x, stats_y + 4), (bar_x + fill_width, stats_y + 20)], fill=color)
+            
+            draw.text((bar_x + 155, stats_y), str(val), fill=TEXT_COLOR, font=font_med)
+            stats_y += stat_pad
+
+    # Draw Card A
+    draw_card(PADDING, CARD_BG_A, dino_a)
+
+    # Draw VS text in the center
+    vs_x = PADDING + CARD_WIDTH + (PADDING // 2) - 15
+    vs_y = (TOTAL_HEIGHT // 2) - 30
+    draw.text((vs_x, vs_y), "VS", fill=(231, 76, 60), font=font_vs)
+
+    # Draw Card B
+    draw_card(PADDING * 2 + CARD_WIDTH, CARD_BG_B, dino_b)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+# ----------------------------
 # Main Schedule View
 # ----------------------------
 class ScheduleView(discord.ui.View):
@@ -2315,6 +2412,117 @@ async def days(ctx):
     await ctx.send(embed=embed)
 
 # ----------------------------
+# Dino Battle Minigame
+# ----------------------------
+DINO_TEMPLATES = [
+    {"id": "t_rex", "name": "T-Rex", "type": "carnivore"},
+    {"id": "triceratops", "name": "Triceratops", "type": "herbivore"},
+    {"id": "velociraptor", "name": "Velociraptor", "type": "carnivore"},
+    {"id": "stegosaurus", "name": "Stegosaurus", "type": "herbivore"},
+    {"id": "spinosaurus", "name": "Spinosaurus", "type": "carnivore"}
+]
+
+class DinoBattleView(discord.ui.View):
+    def __init__(self, dino_a, dino_b):
+        super().__init__(timeout=30) # Bets close in 30 seconds
+        self.dino_a = dino_a
+        self.dino_b = dino_b
+        self.bets_a = set()
+        self.bets_b = set()
+        
+        btn_a = discord.ui.Button(label=f"Bet on {dino_a['name']}", style=discord.ButtonStyle.danger if dino_a['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_a")
+        btn_a.callback = self.bet_a_callback
+        self.add_item(btn_a)
+
+        btn_b = discord.ui.Button(label=f"Bet on {dino_b['name']}", style=discord.ButtonStyle.danger if dino_b['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_b")
+        btn_b.callback = self.bet_b_callback
+        self.add_item(btn_b)
+
+    async def _handle_bet(self, interaction: discord.Interaction, target_set, other_set, dino_name):
+        user_id = interaction.user.id
+        if user_id in other_set:
+            other_set.remove(user_id)
+        if user_id in target_set:
+            await interaction.response.send_message(f"You already bet on **{dino_name}**!", ephemeral=True)
+            return
+        target_set.add(user_id)
+        await interaction.response.send_message(f"🎟️ Locked in your bet for **{dino_name}**!", ephemeral=True)
+
+    async def bet_a_callback(self, interaction: discord.Interaction):
+        await self._handle_bet(interaction, self.bets_a, self.bets_b, self.dino_a['name'])
+
+    async def bet_b_callback(self, interaction: discord.Interaction):
+        await self._handle_bet(interaction, self.bets_b, self.bets_a, self.dino_b['name'])
+
+@bot.command(help="Start a dinosaur battle! Users have 30s to bet.")
+async def dinobattle(ctx):
+    import random
+    
+    # Pick 2 distinct dinos
+    dinos = random.sample(DINO_TEMPLATES, 2)
+    dino_a = dict(dinos[0])
+    dino_b = dict(dinos[1])
+    
+    # Generate random stats for this match
+    for d in [dino_a, dino_b]:
+        d['hp'] = random.randint(80, 150)
+        d['atk'] = random.randint(30, 120)
+        d['def'] = random.randint(30, 120)
+        d['spd'] = random.randint(20, 100)
+        d['total'] = d['hp'] + d['atk'] + d['def'] + d['spd']
+
+    await ctx.send("⚔️ **Generating fighters...**")
+    
+    # Generate image
+    buf = _render_vs_image(dino_a, dino_b)
+    file = discord.File(buf, filename="dinobattle.png")
+    
+    embed = discord.Embed(
+        title="🦖 DINOSAUR BATTLE! 🦕",
+        description="Two titans enter the arena! Review their stats and place your bets within **30 seconds**!\n"
+                    f"**{dino_a['name']}** vs **{dino_b['name']}**",
+        color=0xe67e22
+    )
+    embed.set_image(url="attachment://dinobattle.png")
+    
+    view = DinoBattleView(dino_a, dino_b)
+    msg = await ctx.send(file=file, embed=embed, view=view)
+    
+    # Wait for bets (countdown)
+    await asyncio.sleep(30)
+    
+    # Disable buttons
+    for child in view.children:
+        child.disabled = True
+    await msg.edit(view=view)
+    
+    # Determine winner based on weighted stats
+    total_power = dino_a['total'] + dino_b['total']
+    roll = random.uniform(0, total_power)
+    
+    if roll <= dino_a['total']:
+        winner = dino_a
+        winning_bets = view.bets_a
+    else:
+        winner = dino_b
+        winning_bets = view.bets_b
+        
+    # Announce winner
+    win_embed = discord.Embed(
+        title=f"🏆 The winner is... **{winner['name']}**!",
+        description=f"{winner['name']} won the battle with a total power score of {winner['total']}!",
+        color=0x2ecc71
+    )
+    
+    if winning_bets:
+        mentions = " ".join([f"<@{uid}>" for uid in winning_bets])
+        win_embed.add_field(name="🎉 Winning Bets!", value=mentions)
+    else:
+        win_embed.add_field(name="📉 Bets", value="No one guessed correctly!")
+        
+    await ctx.send(embed=win_embed)
+
+# ----------------------------
 # Custom Help Command
 # ----------------------------
 def _build_everyone_embed():
@@ -2332,6 +2540,7 @@ def _build_everyone_embed():
     embed.add_field(name="📅  !days", value="Show the configured recurring session schedule.", inline=False)
     embed.add_field(name="⏪  !force", value="Force-post the next upcoming scheduled session.", inline=False)
     embed.add_field(name="🥚  !nest", value="Show current nesting status (parents, babies, protectors).", inline=False)
+    embed.add_field(name="🦖  !dinobattle", value="Start a Pokémon-style random dinosaur card battle!", inline=False)
     embed.set_footer(text="Page 1/3 · Session buttons: Attend · Standby · Not Attending · Relieve Spot")
     return embed
 
