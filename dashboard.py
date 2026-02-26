@@ -1352,22 +1352,19 @@ CALENDAR_CSS = """
 .gcal-main { flex:1; min-width:0; }
 .gcal-side { width:260px; flex-shrink:0; }
 
-/* Week grid */
-.week-grid { display:grid; grid-template-columns:70px repeat(7,1fr); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:var(--bg); }
-.week-header { display:contents; }
-.week-header .corner { background:var(--bg2); border-bottom:1px solid var(--border); border-right:1px solid var(--border); padding:8px; }
-.day-col-header { background:var(--bg2); border-bottom:1px solid var(--border); border-right:1px solid var(--border); text-align:center; padding:10px 4px; }
-.day-col-header:last-child { border-right:none; }
-.day-col-header .dow { font-size:11px; text-transform:uppercase; color:var(--text-dim); font-weight:600; letter-spacing:0.5px; }
-.day-col-header .day-num { font-size:22px; font-weight:600; color:var(--text-bright); margin-top:2px; line-height:1.2; }
-.day-col-header.is-today .day-num { background:var(--accent); color:white; border-radius:50%; width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; }
-
-/* Time rows */
-.time-row { display:contents; }
-.time-label { background:var(--bg2); border-right:1px solid var(--border); border-bottom:1px solid var(--border); padding:6px 8px; font-size:11px; color:var(--text-dim); text-align:right; font-weight:500; display:flex; align-items:flex-start; justify-content:flex-end; }
-.time-cell { border-right:1px solid var(--border); border-bottom:1px solid var(--border); min-height:80px; position:relative; cursor:pointer; transition:background 0.12s; }
-.time-cell:last-child { border-right:none; }
-.time-cell:hover { background:rgba(88,101,242,0.06); }
+/* Kanban Layout */
+.kanban-board { display:flex; gap:12px; overflow-x:auto; padding-bottom:10px; min-height: 600px; }
+.kanban-col { background:var(--bg); border:1px solid var(--border); border-radius:var(--radius); min-width:240px; flex:1; display:flex; flex-direction:column; }
+.kanban-header { padding:12px 10px; border-bottom:1px solid var(--border); font-weight:600; text-align:center; background:var(--bg2); border-radius:var(--radius) var(--radius) 0 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+.kanban-cards { min-height:150px; padding:10px; display:flex; flex-direction:column; gap:10px; flex: 1; }
+.kanban-cards.drag-over { background:rgba(88,101,242,0.1); }
+.k-card { background:var(--bg2); border:1px solid var(--border); border-left:4px solid var(--accent); padding:12px; border-radius:6px; cursor:grab; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.1s; display:flex; flex-direction:column; gap:6px; }
+.k-card:hover { border-left-color: var(--green); transform: translateY(-2px); }
+.k-card:active { cursor:grabbing; }
+.k-title { font-weight: 600; font-size: 14px; color: var(--text-bright); }
+.k-time { font-size: 12px; color: var(--text-dim); }
+.k-add { padding:8px; margin:0 10px 10px; border:1px dashed var(--border); text-align:center; color:var(--text-dim); cursor:pointer; font-size:12px; font-weight:600; border-radius:6px; transition:0.2s; }
+.k-add:hover { background:rgba(255,255,255,0.05); color:var(--text-bright); border-color:var(--text-dim); }
 
 /* Event blocks */
 .evt-block { position:absolute; left:2px; right:2px; border-radius:4px; padding:4px 6px; font-size:11px; cursor:pointer; z-index:10; overflow:hidden; transition:box-shadow 0.15s; border-left:3px solid; }
@@ -1480,16 +1477,13 @@ async def calendar_page(request):
     <div class="container" style="max-width:1400px">
         <div class="gcal-toolbar">
             <div class="gcal-nav">
-                <button class="today-btn" onclick="goToday()">Today</button>
-                <button onclick="changeWeek(-1)">&#9664;</button>
-                <button onclick="changeWeek(1)">&#9654;</button>
-                <h2 id="week-title" style="margin-left:12px"></h2>
+                <h2 id="week-title" style="margin-left:0">Kanban Schedule</h2>
             </div>
-            <div class="gcal-tz">GMT-05 &middot; EST &middot; 24h</div>
+            <div class="gcal-tz">Drag and drop recurring sessions to move days | Timezone: EST</div>
         </div>
         <div class="gcal-container">
             <div class="gcal-main">
-                <div class="week-grid" id="week-grid"></div>
+                <div class="kanban-board" id="kanban-board"></div>
             </div>
             <div class="gcal-side">
                 <div class="card" style="padding:12px">
@@ -1617,7 +1611,7 @@ async def calendar_page(request):
     }
 
     function renderAll() {
-        renderWeekGrid();
+        renderKanbanBoard();
         renderMiniCal();
         renderCurrentSession();
         renderRecurring();
@@ -1639,78 +1633,72 @@ async def calendar_page(request):
         openScheduleAt(el.dataset.date, parseInt(el.dataset.hour), parseInt(el.dataset.dow));
     }
 
-    function renderWeekGrid() {
-        const grid = document.getElementById('week-grid');
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        const now = new Date();
-        let html = '';
+    let draggedSessionIdx = -1;
 
-        html += '<div class="week-header">';
-        html += '<div class="corner"><span class="gcal-tz" style="font-size:10px">GMT-05</span></div>';
+    function handleDragStart(e, idx) {
+        draggedSessionIdx = idx;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => e.target.style.opacity = '0.5', 0);
+    }
+
+    function allowDrop(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleDrop(e, newDow) {
+        e.preventDefault();
+        if (draggedSessionIdx === -1) return;
+        
+        sessionDays[draggedSessionIdx].weekday = newDow;
+        draggedSessionIdx = -1;
+        
+        renderKanbanBoard();
+        renderRecurring();
+        
+        // Sync with backend
+        fetch('/api/update-recurring-days', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ session_days: sessionDays })
+        }).then(r => r.json()).then(d => {
+            if(d.ok) _toast('Kanban Schedule updated!');
+            else alert('Failed to sync Kanban: ' + (d.error || 'Unknown error'));
+        });
+    }
+
+    function renderKanbanBoard() {
+        const board = document.getElementById('kanban-board');
+        if (!board) return;
+        
+        // Discord Bot weekdays: 0=Monday, 6=Sunday
+        // JS getDay(): 0=Sunday, 1=Monday
+        // WEEKDAYS_FULL index matches JS getDay()
+        
+        let html = '';
         for (let i = 0; i < 7; i++) {
-            const d = new Date(weekStart);
-            d.setDate(d.getDate() + i);
-            const isToday = d.toDateString() === today.toDateString();
-            html += '<div class="day-col-header' + (isToday ? ' is-today' : '') + '">';
-            html += '<div class="dow">' + WEEKDAYS_SHORT[d.getDay()] + '</div>';
-            html += '<div class="day-num">' + d.getDate() + '</div>';
+            const jsDow = (i + 1) % 7; 
+            const dayName = WEEKDAYS_FULL[jsDow];
+            
+            html += '<div class="kanban-col" data-dow="' + i + '" ondragover="allowDrop(event)" ondrop="handleDrop(event, ' + i + ')">';
+            html += '<div class="kanban-header">' + dayName + '</div>';
+            html += '<div class="kanban-cards">';
+            
+            sessionDays.forEach(function(sd, idx) {
+                if (sd.weekday === i) {
+                    html += '<div class="k-card" draggable="true" ondragstart="handleDragStart(event, ' + idx + ')">';
+                    html += '<div class="k-title">' + (sd.name || 'Session') + '</div>';
+                    html += '<div class="k-time">⏰ ' + String(sd.hour).padStart(2,'0') + ':00</div>';
+                    html += '</div>';
+                }
+            });
+            
+            html += '</div>';
+            html += '<div class="k-add" onclick="openAddRecurring(' + i + ')">+ Add Card</div>';
             html += '</div>';
         }
-        html += '</div>';
-
-        TIME_SLOTS.forEach(function(slot) {
-            html += '<div class="time-row">';
-            html += '<div class="time-label">' + String(slot.start).padStart(2,'0') + ':00</div>';
-
-            for (let i = 0; i < 7; i++) {
-                const d = new Date(weekStart);
-                d.setDate(d.getDate() + i);
-                const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-                const dow = (d.getDay() + 6) % 7;
-
-                html += '<div class="time-cell" data-date="' + dateStr + '" data-hour="' + slot.start + '" data-dow="' + d.getDay() + '" onclick="handleCellClick(this)">';
-
-                sessionDays.forEach(function(sd) {
-                    if (sd.weekday === dow && sd.hour >= slot.start && sd.hour < slot.end) {
-                        const topPct = ((sd.hour - slot.start) / 4) * 100;
-                        html += '<div class="evt-block evt-recurring" style="top:' + topPct + '%;height:25%" onclick="event.stopPropagation()">';
-                        html += '<div class="evt-title">' + (sd.name || 'Session') + '</div>';
-                        html += '<div class="evt-time">' + String(sd.hour).padStart(2,'0') + ':00</div>';
-                        html += '</div>';
-                    }
-                });
-
-                if (currentSession.dt) {
-                    const sdt = new Date(currentSession.dt);
-                    const sDateStr = sdt.getFullYear() + '-' + String(sdt.getMonth()+1).padStart(2,'0') + '-' + String(sdt.getDate()).padStart(2,'0');
-                    const sHour = sdt.getHours();
-                    if (sDateStr === dateStr && sHour >= slot.start && sHour < slot.end) {
-                        const topPct = ((sHour - slot.start) / 4) * 100;
-                        const cls = currentSession.ended ? 'evt-ended' : 'evt-active';
-                        const attCount = currentSession.attendees.filter(function(a) { return a.status === 'attending'; }).length;
-                        html += '<div class="evt-block ' + cls + '" style="top:' + topPct + '%;height:30%" onclick="event.stopPropagation(); openEditSession()">';
-                        html += '<div class="evt-title">' + (currentSession.name || 'Session') + '</div>';
-                        html += '<div class="evt-time">' + String(sHour).padStart(2,'0') + ':' + String(sdt.getMinutes()).padStart(2,'0') + '</div>';
-                        html += '<div class="evt-attendees">\\ud83d\\udc65 ' + attCount + ' attending</div>';
-                        html += '</div>';
-                    }
-                }
-
-                if (d.toDateString() === new Date().toDateString()) {
-                    const nowH = now.getHours() + now.getMinutes()/60;
-                    if (nowH >= slot.start && nowH < slot.end) {
-                        const topPct = ((nowH - slot.start) / 4) * 100;
-                        html += '<div class="now-line" style="top:' + topPct + '%"></div>';
-                    }
-                }
-
-                html += '</div>';
-            }
-            html += '</div>';
-        });
-
-        grid.innerHTML = html;
+        
+        board.innerHTML = html;
     }
 
     function renderMiniCal() {
@@ -2163,6 +2151,28 @@ async def api_remove_session_day(request):
             return web.json_response({"ok": True, "days": session_days})
     return web.json_response({"error": "Invalid index"}, status=400)
 
+@routes.post("/api/update-recurring-days")
+async def api_update_recurring_days(request):
+    """Update all recurring session days (e.g. from Kanban drag and drop)."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+        
+    try:
+        data = await request.json()
+        new_session_days = data.get("session_days")
+        
+        if not isinstance(new_session_days, list):
+            return web.json_response({"error": "Invalid payload format."}, status=400)
+            
+        update_fn = _state_getters.get("update_settings")
+        if update_fn:
+            update_fn({"session_days": new_session_days})
+            await push_log(f"🔁 Dashboard: Updated Kanban Calendar Session Days")
+            return web.json_response({"ok": True})
+        return web.json_response({"error": "Update not available"}, status=500)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
 @routes.get("/api/channels")
 async def api_channels(request):
     """Return list of text channels grouped by guild for cascading dropdowns."""
@@ -2433,6 +2443,28 @@ async def api_upload_card(request):
         await push_log(f"🦖 Dashboard: Registered stats for {new_template['name']} ({dino_id})")
         
     return web.json_response({"ok": True})
+
+@routes.post("/api/edit-current-session")
+async def api_edit_current_session(request):
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+        
+    try:
+        data = await request.json()
+        new_name = data.get("name", "").strip()
+        new_dt_str = data.get("dt", "").strip()
+        
+        if not new_name:
+            return web.json_response({"error": "Session name cannot be empty."}, status=400)
+            
+        edit_hook = _state_getters.get("edit_current_session")
+        if edit_hook:
+            await edit_hook(new_name, new_dt_str)
+            await push_log(f"📝 Dashboard: Edited active session: {new_name}")
+            return web.json_response({"ok": True})
+        return web.json_response({"error": "Bot hook missing"}, status=500)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 @routes.post("/api/delete-card")
 async def api_delete_card(request):

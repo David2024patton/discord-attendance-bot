@@ -615,6 +615,12 @@ async def sync_users_from_ids():
 def sync_ids_from_users():
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
 
+    # Fallback assignment for Nesting sessions: if an attending user has no explicit role, default to Protector.
+    if session_type == 'nesting':
+        for u in attending:
+            if u.id not in nest_parent_ids and u.id not in nest_baby_ids and u.id not in nest_protector_ids:
+                nest_protector_ids.append(u.id)
+
     attending_ids = [u.id for u in attending]
     standby_ids = [u.id for u in standby]
     not_attending_ids = [u.id for u in not_attending]
@@ -1216,9 +1222,16 @@ def _render_vs_image(dino_a, dino_b):
         )
         
         # Name
-        name_bbox = draw.textbbox((0, 0), dino['name'], font=font_large)
+        font_name = font_large
+        name_bbox = draw.textbbox((0, 0), dino['name'], font=font_name)
+        if (name_bbox[2] - name_bbox[0]) > CARD_WIDTH - 20:
+            try:
+                font_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+                name_bbox = draw.textbbox((0, 0), dino['name'], font=font_name)
+            except OSError:
+                pass
         name_x = x_offset + (CARD_WIDTH - (name_bbox[2] - name_bbox[0])) // 2
-        draw.text((name_x, PADDING + 15), dino['name'], fill=TEXT_COLOR, font=font_large)
+        draw.text((name_x, PADDING + 15), dino['name'], fill=TEXT_COLOR, font=font_name)
 
         # Avatar
         try:
@@ -1303,17 +1316,7 @@ class ScheduleView(discord.ui.View):
             btn_prot.callback = self.join_protector
             self.add_item(btn_prot)
 
-            # 4. Standby
-            btn_standby = discord.ui.Button(label="Slot Standby", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="schedule_standby")
-            btn_standby.callback = self.join_standby
-            self.add_item(btn_standby)
-
-            # 5. Not Attending
-            btn_not = discord.ui.Button(label="Not Nesting", style=discord.ButtonStyle.danger, emoji="😞", custom_id="schedule_not_attend")
-            btn_not.callback = self.not_attend
-            self.add_item(btn_not)
-
-            # 6. Relieve Spot (Row 1)
+            # 4. Relieve Spot (Row 1)
             btn_relieve = discord.ui.Button(label="Relieve Slot", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="schedule_relieve", row=1)
             btn_relieve.callback = self.relieve_spot
             self.add_item(btn_relieve)
@@ -1750,6 +1753,28 @@ async def create_schedule(channel, session_name_arg: str, session_dt: datetime =
             await status_ch.send(embed=status_embed)
         except Exception as e:
             print(f"❌ Could not post to status channel: {e}")
+
+async def edit_current_session(new_name: str, new_dt_str: str):
+    """Called by dashboard.py to instantly alter the active session name/time without creating a new message."""
+    global session_name, session_dt_str, event_message, countdown_task
+    
+    session_name = new_name
+    session_dt_str = new_dt_str
+    save_state()
+    
+    # Reload the live countdown task with the new target time
+    if countdown_task and not countdown_task.done():
+        countdown_task.cancel()
+    if session_dt_str:
+        countdown_task = asyncio.create_task(_run_countdown())
+        
+    # Dynamically update the Discord message embed
+    if event_message:
+        try:
+            await event_message.edit(embed=build_embed())
+            print(f"✅ Session actively edited to: {new_name}")
+        except Exception as e:
+            print(f"❌ Failed to edit Discord message: {e}")
 
 # ----------------------------
 # Live Countdown Timer
@@ -2540,7 +2565,40 @@ class DinoBattleView(discord.ui.View):
         embed.set_footer(text="Session buttons: Attend · Standby · Not Attending · Relieve Spot")
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+class DinoPostBattleView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        btn_lb = discord.ui.Button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, custom_id="post_lb")
+        btn_lb.callback = self.lb_callback
+        self.add_item(btn_lb)
+        btn_menu = discord.ui.Button(label="📚 Menu", style=discord.ButtonStyle.primary, custom_id="post_menu")
+        btn_menu.callback = self.menu_callback
+        self.add_item(btn_menu)
+
+    async def lb_callback(self, interaction: discord.Interaction):
+        lb = load_dino_lb()
+        if not lb:
+            await interaction.response.send_message("No Dino Battle bets on record yet!", ephemeral=True)
+            return
+        sorted_lb = sorted(lb.items(), key=lambda x: x[1]['wins'], reverse=True)
+        desc = []
+        for rank, (uid_str, stats) in enumerate(sorted_lb[:15]):
+            user = await interaction.client.fetch_user(int(uid_str))
+            name = user.display_name if user else f"User {uid_str}"
+            w, l, t = stats['wins'], stats['losses'], stats['ties']
+            s, bs = stats.get('streak', 0), stats.get('best_streak', 0)
+            desc.append(f"**#{rank+1}** {name} — **{w}** W / **{l}** L / **{t}** Ties | Streak: 🔥{s} (Best: {bs})")
+        embed = discord.Embed(title="🦖 Dino Battle Leaderboard 🦕", description="\n".join(desc), color=0xf1c40f)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    async def menu_callback(self, interaction: discord.Interaction):
+        view = HelpView(interaction.user.id, show_admin=False)
+        embed = _build_everyone_embed()
+        embed.set_footer(text="Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 @bot.command(help="Start a dinosaur battle! Users have 60s to bet.")
+
 async def dinobattle(ctx):
     import random
     import time
@@ -2670,6 +2728,9 @@ async def dinobattle(ctx):
         loser = fighter2
 
     if winner:
+        log.append(f"💀 **{loser['name']}** collapses!")
+    
+    if winner:
         winning_bets = view.bets_a if winner['name'] == dino_a['name'] else view.bets_b
         
         win_embed = discord.Embed(
@@ -2736,10 +2797,11 @@ async def dinobattle(ctx):
     else:
         win_embed.add_field(name="📉 Bets", value="No one guessed correctly!", inline=False)
         
+    post_view = DinoPostBattleView()
     if attachments:
-        await ctx.send(embed=win_embed, file=attachments[0])
+        await ctx.send(embed=win_embed, file=attachments[0], view=post_view)
     else:
-        await ctx.send(embed=win_embed)
+        await ctx.send(embed=win_embed, view=post_view)
 
 @bot.command(help="Show the top bettors for Dino Battles.")
 async def dinostats(ctx):
@@ -3254,6 +3316,7 @@ async def on_ready():
         "save_dinos":         save_dinos,
         "load_dino_lb":       load_dino_lb,
         "create_schedule":    create_schedule,
+        "edit_current_session": edit_current_session,
     })
     await dashboard.start_dashboard(bot)
 
