@@ -622,8 +622,10 @@ async def settings_page(request):
     cur_session_type = g.get("session_type", lambda: "hunt")()
     nest_parent_ids = g.get("nest_parent_ids", lambda: [])()
     nest_baby_ids = g.get("nest_baby_ids", lambda: [])()
+    nest_protector_ids = g.get("nest_protector_ids", lambda: [])()
     nest_parent_ids_json = json.dumps(nest_parent_ids or [])
     nest_baby_ids_json = json.dumps(nest_baby_ids or [])
+    nest_protector_ids_json = json.dumps(nest_protector_ids or [])
 
     days_html = ""
     for d in session_days:
@@ -703,6 +705,15 @@ async def settings_page(request):
                         <button class="btn btn-secondary" style="padding:0 12px" onclick="addNestingUser('baby')">Add</button>
                     </div>
                     <div id="nestBabiesContainer" class="role-list" style="margin-top:8px;min-height:40px;align-content:flex-start"></div>
+                </div>
+                <div>
+                    <div class="setting-label">Protectors</div>
+                    <div class="setting-desc">Users defending the nest</div>
+                    <div style="display:flex;gap:6px;margin-top:8px">
+                        <select class="setting-input" id="nestProtectorSelect" style="flex:1;text-align:left"><option value="">-- Select Member --</option></select>
+                        <button class="btn btn-secondary" style="padding:0 12px" onclick="addNestingUser('protector')">Add</button>
+                    </div>
+                    <div id="nestProtectorsContainer" class="role-list" style="margin-top:8px;min-height:40px;align-content:flex-start"></div>
                 </div>
             </div>
             <div style="margin-top:16px;text-align:right">
@@ -837,6 +848,7 @@ async def settings_page(request):
     let _allMembers = [];
     let _currentNestParents = {nest_parent_ids_json};
     let _currentNestBabies = {nest_baby_ids_json};
+    let _currentNestProtectors = {nest_protector_ids_json};
 
     fetch('/api/members').then(r => r.json()).then(d => {{
         _allMembers = [];
@@ -847,9 +859,11 @@ async def settings_page(request):
         
         populateMemberDropdown('nestParentSelect');
         populateMemberDropdown('nestBabySelect');
+        populateMemberDropdown('nestProtectorSelect');
         
         renderNestingChips('parent', 'nestParentsContainer', _currentNestParents);
         renderNestingChips('baby', 'nestBabiesContainer', _currentNestBabies);
+        renderNestingChips('protector', 'nestProtectorsContainer', _currentNestProtectors);
     }});
 
     function populateMemberDropdown(selectId) {{
@@ -867,7 +881,8 @@ async def settings_page(request):
         const container = document.getElementById(containerId);
         container.innerHTML = '';
         if (idList.length === 0) {{
-            container.innerHTML = '<span style="color:var(--text-dim);font-size:13px">No ' + (type === 'parent' ? 'parents' : 'babies') + ' configured</span>';
+            const lbl = type === 'parent' ? 'parents' : (type === 'baby' ? 'babies' : 'protectors');
+            container.innerHTML = '<span style="color:var(--text-dim);font-size:13px">No ' + lbl + ' configured</span>';
             return;
         }}
         idList.forEach(id => {{
@@ -880,7 +895,7 @@ async def settings_page(request):
             chip.style.alignItems = 'center';
             chip.style.gap = '6px';
             
-            const emoji = type === 'parent' ? '🦕' : '🐣';
+            const emoji = type === 'parent' ? '🦕' : (type === 'baby' ? '🐣' : '🛡️');
             chip.innerHTML = '<span>' + emoji + ' ' + name + '</span> <span style="font-size:10px;opacity:0.6;background:rgba(0,0,0,0.2);border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;margin-left:4px" onclick="removeNestingUser(\\'' + type + '\\', \\'' + id + '\\', event)">✕</span>';
             
             container.appendChild(chip);
@@ -888,9 +903,9 @@ async def settings_page(request):
     }}
 
     window.addNestingUser = function(type) {{
-        const selId = type === 'parent' ? 'nestParentSelect' : 'nestBabySelect';
-        const containerId = type === 'parent' ? 'nestParentsContainer' : 'nestBabiesContainer';
-        const list = type === 'parent' ? _currentNestParents : _currentNestBabies;
+        const selId = type === 'parent' ? 'nestParentSelect' : (type === 'baby' ? 'nestBabySelect' : 'nestProtectorSelect');
+        const containerId = type === 'parent' ? 'nestParentsContainer' : (type === 'baby' ? 'nestBabiesContainer' : 'nestProtectorsContainer');
+        const list = type === 'parent' ? _currentNestParents : (type === 'baby' ? _currentNestBabies : _currentNestProtectors);
         
         const sel = document.getElementById(selId);
         const id = sel.value;
@@ -905,8 +920,8 @@ async def settings_page(request):
 
     window.removeNestingUser = function(type, id, event) {{
         if (event) event.stopPropagation();
-        const containerId = type === 'parent' ? 'nestParentsContainer' : 'nestBabiesContainer';
-        const list = type === 'parent' ? _currentNestParents : _currentNestBabies;
+        const containerId = type === 'parent' ? 'nestParentsContainer' : (type === 'baby' ? 'nestBabiesContainer' : 'nestProtectorsContainer');
+        const list = type === 'parent' ? _currentNestParents : (type === 'baby' ? _currentNestBabies : _currentNestProtectors);
         
         const index = list.indexOf(String(id));
         if (index > -1) {{
@@ -918,7 +933,8 @@ async def settings_page(request):
     window.saveNesting = function() {{
         _post('/api/settings', {{
             nest_parent_ids: _currentNestParents,
-            nest_baby_ids: _currentNestBabies
+            nest_baby_ids: _currentNestBabies,
+            nest_protector_ids: _currentNestProtectors
         }}, 'Nesting roles saved! (Applies instantly to active session)');
     }};
     // ================================

@@ -127,7 +127,7 @@ def load_state():
     global checkin_active, checked_in_ids, checkin_message_id
     global admin_role_names, beta_role_names, archive_channel_id, session_ended
     global status_channel_id, status_start_msg, status_stop_msg
-    global session_type, nest_parent_ids, nest_baby_ids
+    global session_type, nest_parent_ids, nest_baby_ids, nest_protector_ids
 
     try:
         if os.path.exists(STATE_FILE):
@@ -164,6 +164,7 @@ def load_state():
                 session_type = data.get('session_type', 'hunt')
                 nest_parent_ids = data.get('nest_parent_ids', [])
                 nest_baby_ids = data.get('nest_baby_ids', [])
+                nest_protector_ids = data.get('nest_protector_ids', [])
                 print(f"✅ Loaded state from {STATE_FILE}")
                 return True
     except Exception as e:
@@ -201,6 +202,7 @@ def load_state():
     session_type = 'hunt'
     nest_parent_ids = []
     nest_baby_ids = []
+    nest_protector_ids = []
     return False
 
 def save_state():
@@ -232,6 +234,7 @@ def save_state():
         'session_type': session_type,
         'nest_parent_ids': nest_parent_ids,
         'nest_baby_ids': nest_baby_ids,
+        'nest_protector_ids': nest_protector_ids,
     }
     try:
         with open(STATE_FILE, 'w') as f:
@@ -639,7 +642,7 @@ def build_embed():
         # Parents
         parents = [u for u in attending if u.id in nest_parent_ids]
         babies = [u for u in attending if u.id in nest_baby_ids]
-        protectors = [u for u in attending if u.id not in nest_parent_ids and u.id not in nest_baby_ids]
+        protectors = [u for u in attending if u.id in nest_protector_ids]
 
         if parents:
             parent_text = "\n".join(f"`{i+1}.` {u.mention} 🦕" for i, u in enumerate(parents))
@@ -1051,64 +1054,173 @@ def _render_leaderboard_image(entries, clicker_id):
 class ScheduleView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.update_button_labels()
+        self.build_buttons()
 
-    def update_button_labels(self):
-        # Index 0: Attend, 1: Standby, 2: Not Attending, 3: Relieve
-        attend_btn = self.children[0]
-        standby_btn = self.children[1]
-        decline_btn = self.children[2]
-        relieve_btn = self.children[3]
-
+    def build_buttons(self):
+        self.clear_items()
         if session_type == 'nesting':
-            attend_btn.label = "Request Slot"
-            attend_btn.emoji = "🥚"
-            standby_btn.label = "Slot Standby"
-            decline_btn.label = "Not Nesting"
-            relieve_btn.label = "Relieve Slot"
-        elif session_type == 'growth':
-            attend_btn.label = "Join Growth"
-            attend_btn.emoji = "🌱"
-            standby_btn.label = "Standby"
-            decline_btn.label = "Skipping"
-            relieve_btn.label = "Relieve Spot"
-        elif session_type == 'pvp':
-            attend_btn.label = "Join Battle"
-            attend_btn.emoji = "⚔️"
-            standby_btn.label = "Standby"
-            decline_btn.label = "Retreating"
-            relieve_btn.label = "Relieve Spot"
-        elif session_type == 'migration':
-            attend_btn.label = "Join Herd"
-            attend_btn.emoji = "🏃"
-            standby_btn.label = "Standby"
-            decline_btn.label = "Staying Behind"
-            relieve_btn.label = "Relieve Spot"
+            # 1. Parent
+            btn_parent = discord.ui.Button(label="Join as Parent", style=discord.ButtonStyle.success, emoji="🦕", custom_id="nest_parent")
+            btn_parent.callback = self.join_parent
+            self.add_item(btn_parent)
+
+            # 2. Baby
+            btn_baby = discord.ui.Button(label="Join as Baby", style=discord.ButtonStyle.primary, emoji="🐣", custom_id="nest_baby")
+            btn_baby.callback = self.join_baby
+            self.add_item(btn_baby)
+
+            # 3. Protector
+            btn_prot = discord.ui.Button(label="Join as Protector", style=discord.ButtonStyle.secondary, emoji="🛡️", custom_id="nest_protector")
+            btn_prot.callback = self.join_protector
+            self.add_item(btn_prot)
+
+            # 4. Standby
+            btn_standby = discord.ui.Button(label="Slot Standby", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="schedule_standby")
+            btn_standby.callback = self.join_standby
+            self.add_item(btn_standby)
+
+            # 5. Not Attending
+            btn_not = discord.ui.Button(label="Not Nesting", style=discord.ButtonStyle.danger, emoji="😞", custom_id="schedule_not_attend")
+            btn_not.callback = self.not_attend
+            self.add_item(btn_not)
+
+            # 6. Relieve Spot (Row 1)
+            btn_relieve = discord.ui.Button(label="Relieve Slot", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="schedule_relieve", row=1)
+            btn_relieve.callback = self.relieve_spot
+            self.add_item(btn_relieve)
+            
         else:
-            # Default (hunt)
-            attend_btn.label = "Join Hunt"
-            attend_btn.emoji = "🦴"
-            standby_btn.label = "Standby"
-            decline_btn.label = "Can't Make It"
-            relieve_btn.label = "Relieve Spot"
+            # Standard Session Buttons
+            btn_attend = discord.ui.Button(style=discord.ButtonStyle.success, custom_id="schedule_attend")
+            btn_attend.callback = self.attend
+            
+            btn_standby = discord.ui.Button(label="Standby", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="schedule_standby")
+            btn_standby.callback = self.join_standby
+            
+            btn_not = discord.ui.Button(style=discord.ButtonStyle.danger, custom_id="schedule_not_attend")
+            btn_not.callback = self.not_attend
+            
+            btn_relieve = discord.ui.Button(label="Relieve Spot", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="schedule_relieve")
+            btn_relieve.callback = self.relieve_spot
+
+            if session_type == 'growth':
+                btn_attend.label, btn_attend.emoji = "Join Growth", "🌱"
+                btn_not.label, btn_not.emoji = "Skipping", "😞"
+            elif session_type == 'pvp':
+                btn_attend.label, btn_attend.emoji = "Join Battle", "⚔️"
+                btn_not.label, btn_not.emoji = "Retreating", "😞"
+            elif session_type == 'migration':
+                btn_attend.label, btn_attend.emoji = "Join Herd", "🏃"
+                btn_not.label, btn_not.emoji = "Staying Behind", "😞"
+            else:
+                btn_attend.label, btn_attend.emoji = "Join Hunt", "🦴"
+                btn_not.label, btn_not.emoji = "Can't Make It", "😞"
+
+            self.add_item(btn_attend)
+            self.add_item(btn_standby)
+            self.add_item(btn_not)
+            self.add_item(btn_relieve)
+
+        # Admin Controls (Row 1) (Same for all)
+        row = 1 if session_type != 'nesting' else 1
+        btn_end = discord.ui.Button(label="End Session", style=discord.ButtonStyle.secondary, emoji="🔴", custom_id="schedule_end_session", row=row)
+        btn_end.callback = self.end_session_btn
+        self.add_item(btn_end)
+
+        btn_menu = discord.ui.Button(label="Menu", style=discord.ButtonStyle.secondary, emoji="📋", custom_id="schedule_menu", row=row)
+        btn_menu.callback = self.menu_btn
+        self.add_item(btn_menu)
+
+        btn_lb = discord.ui.Button(label="Leaderboard", style=discord.ButtonStyle.primary, emoji="📊", custom_id="schedule_leaderboard", row=row)
+        btn_lb.callback = self.leaderboard_btn
+        self.add_item(btn_lb)
 
     async def update_embed(self):
         if event_message:
-            self.update_button_labels()
+            self.build_buttons()
             await event_message.edit(embed=build_embed(), view=self)
 
-    @discord.ui.button(label="Attend", style=discord.ButtonStyle.success, emoji="✅", custom_id="schedule_attend")
-    async def attend(self, interaction: discord.Interaction, button: discord.ui.Button):
+    # --- Nesting Specific Callbacks ---
+    async def join_parent(self, interaction: discord.Interaction):
+        if await self._handle_common_checks(interaction): return
         user = interaction.user
+        if user.id in nest_parent_ids:
+            await interaction.response.send_message("You are already a Parent!", ephemeral=True)
+            return
+        if len(nest_parent_ids) >= 2:
+            await interaction.response.send_message("❌ The nest already has 2 parents! You cannot join as a parent.", ephemeral=True)
+            return
+        
+        await self._remove_from_other_nest_roles(user.id)
+        nest_parent_ids.append(user.id)
+        await self._ensure_attending(user, interaction, "🦕 Joined as a Nest Parent!")
+
+    async def join_baby(self, interaction: discord.Interaction):
+        if await self._handle_common_checks(interaction): return
+        user = interaction.user
+        if user.id in nest_baby_ids:
+            await interaction.response.send_message("You are already a Baby!", ephemeral=True)
+            return
+            
+        await self._remove_from_other_nest_roles(user.id)
+        nest_baby_ids.append(user.id)
+        await self._ensure_attending(user, interaction, "🐣 Joined as a Baby!")
+
+    async def join_protector(self, interaction: discord.Interaction):
+        if await self._handle_common_checks(interaction): return
+        user = interaction.user
+        if user.id in nest_protector_ids:
+            await interaction.response.send_message("You are already a Protector!", ephemeral=True)
+            return
+            
+        await self._remove_from_other_nest_roles(user.id)
+        nest_protector_ids.append(user.id)
+        await self._ensure_attending(user, interaction, "🛡️ Joined as a Protector!")
+
+    async def _remove_from_other_nest_roles(self, uid):
+        if uid in nest_parent_ids: nest_parent_ids.remove(uid)
+        if uid in nest_baby_ids: nest_baby_ids.remove(uid)
+        if uid in nest_protector_ids: nest_protector_ids.remove(uid)
+
+    async def _ensure_attending(self, user, interaction, success_msg):
+        # Move user to attending if not already there, handle standby/not_attending logic
+        if user in not_attending:
+            not_attending.remove(user)
+        if user in standby:
+            standby.remove(user)
+            
+        if user not in attending:
+            if len(attending) < MAX_ATTENDING and pending_offer is None:
+                attending.append(user)
+            else:
+                # If full, put them back on standby and don't assign role
+                standby.append(user)
+                await self._remove_from_other_nest_roles(user.id)
+                sync_ids_from_users()
+                await interaction.response.send_message("Attending is full! You've been placed on standby.", ephemeral=True)
+                await self.update_embed()
+                return
+
+        sync_ids_from_users()
+        await interaction.response.send_message(success_msg, ephemeral=True)
+        await self.update_embed()
+
+    async def _handle_common_checks(self, interaction: discord.Interaction):
         if session_has_started() or session_ended:
             msg = "🔴 Session has ended." if session_ended else "🔒 Session has already started — sign-ups are closed."
             await interaction.response.send_message(msg, ephemeral=True)
-            return
+            return True
+        return False
+
+    # --- Standard Callbacks ---
+    async def attend(self, interaction: discord.Interaction):
+        if await self._handle_common_checks(interaction): return
+        user = interaction.user
+        
         if user in attending:
             await interaction.response.send_message("You're already attending!", ephemeral=True)
             return
         if user in standby:
-            # Allow standby users to move to attending if there's room
             if len(attending) < MAX_ATTENDING and pending_offer is None:
                 standby.remove(user)
                 attending.append(user)
@@ -1122,7 +1234,6 @@ class ScheduleView(discord.ui.View):
         if user in not_attending:
             not_attending.remove(user)
 
-        # No-show penalty: auto-standby if too many no-shows
         if is_auto_standby(user.id):
             stats = get_user_stats(user.id)
             rate = int((stats['no_shows'] / stats['total_signups']) * 100)
@@ -1144,13 +1255,9 @@ class ScheduleView(discord.ui.View):
         await interaction.response.send_message("Updated your attendance.", ephemeral=True)
         await self.update_embed()
 
-    @discord.ui.button(label="Maybe / Standby", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="schedule_standby")
-    async def join_standby(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def join_standby(self, interaction: discord.Interaction):
+        if await self._handle_common_checks(interaction): return
         user = interaction.user
-        if session_has_started() or session_ended:
-            msg = "🔴 Session has ended." if session_ended else "🔒 Session has already started — sign-ups are closed."
-            await interaction.response.send_message(msg, ephemeral=True)
-            return
         if user in standby:
             await interaction.response.send_message("You're already on standby!", ephemeral=True)
             return
@@ -1163,13 +1270,9 @@ class ScheduleView(discord.ui.View):
         await interaction.response.send_message("Added to standby.", ephemeral=True)
         await self.update_embed()
 
-    @discord.ui.button(label="Not Attending", style=discord.ButtonStyle.danger, emoji="😞", custom_id="schedule_not_attend")
-    async def not_attend(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def not_attend(self, interaction: discord.Interaction):
+        if await self._handle_common_checks(interaction): return
         user = interaction.user
-        if session_has_started() or session_ended:
-            msg = "🔴 Session has ended." if session_ended else "🔒 Session has already started — sign-ups are closed."
-            await interaction.response.send_message(msg, ephemeral=True)
-            return
         removed = False
         if user in attending:
             attending.remove(user)
@@ -1185,8 +1288,7 @@ class ScheduleView(discord.ui.View):
         await interaction.response.send_message("Marked as not attending.", ephemeral=True)
         await self.update_embed()
 
-    @discord.ui.button(label="Relieve Spot", style=discord.ButtonStyle.primary, emoji="🔄", custom_id="schedule_relieve")
-    async def relieve_spot(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def relieve_spot(self, interaction: discord.Interaction):
         user = interaction.user
         if session_ended:
             await interaction.response.send_message("🔴 Session has ended.", ephemeral=True)
@@ -1204,8 +1306,7 @@ class ScheduleView(discord.ui.View):
         )
         await self.update_embed()
 
-    @discord.ui.button(label="End Session", style=discord.ButtonStyle.secondary, emoji="🔴", custom_id="schedule_end_session", row=1)
-    async def end_session_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def end_session_btn(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Only admins can end a session.", ephemeral=True)
             return
@@ -1215,8 +1316,7 @@ class ScheduleView(discord.ui.View):
         await interaction.response.send_message("🔴 Ending session...", ephemeral=True)
         await end_session()
 
-    @discord.ui.button(label="Menu", style=discord.ButtonStyle.secondary, emoji="📋", custom_id="schedule_menu", row=1)
-    async def menu_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def menu_btn(self, interaction: discord.Interaction):
         """Whisper the help menu to the user (true ephemeral)."""
         user_is_admin = is_admin(interaction.user)
         embed = _build_everyone_embed()
@@ -1237,8 +1337,7 @@ class ScheduleView(discord.ui.View):
                 ephemeral=True
             )
 
-    @discord.ui.button(label="Leaderboard", style=discord.ButtonStyle.primary, emoji="📊", custom_id="schedule_leaderboard", row=1)
-    async def leaderboard_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def leaderboard_btn(self, interaction: discord.Interaction):
         """Post the attendance leaderboard as an image in the channel (with 60s cooldown)."""
         global _leaderboard_cooldown
         now = datetime.now(EST)
@@ -1791,11 +1890,12 @@ async def settype(ctx, type_name: str = None):
         await ctx.send(f"❌ Invalid type. Available: {types_list}", delete_after=10)
         return
 
-    global session_type, nest_parent_ids, nest_baby_ids
+    global session_type, nest_parent_ids, nest_baby_ids, nest_protector_ids
     session_type = type_name.lower()
     if session_type != 'nesting':
         nest_parent_ids = []
         nest_baby_ids = []
+        nest_protector_ids = []
     save_state()
 
     sinfo = SESSION_TYPES[session_type]
@@ -2370,7 +2470,7 @@ def update_settings(data):
     global MAX_ATTENDING, CHECKIN_GRACE_MINUTES, NOSHOW_THRESHOLD
     global admin_role_names, beta_role_names, archive_channel_id, session_days
     global status_channel_id, status_start_msg, status_stop_msg
-    global session_type, nest_parent_ids, nest_baby_ids
+    global session_type, nest_parent_ids, nest_baby_ids, nest_protector_ids
     if "max_attending" in data:
         MAX_ATTENDING = int(data["max_attending"])
     if "checkin_grace" in data:
@@ -2397,6 +2497,7 @@ def update_settings(data):
         if session_type != 'nesting':
             nest_parent_ids.clear()
             nest_baby_ids.clear()
+            nest_protector_ids.clear()
     
     # Process nesting arrays when present
     if "nest_parent_ids" in data:
@@ -2405,6 +2506,9 @@ def update_settings(data):
     if "nest_baby_ids" in data:
         nest_baby_ids.clear()
         nest_baby_ids.extend([str(uid) for uid in data["nest_baby_ids"]])
+    if "nest_protector_ids" in data:
+        nest_protector_ids.clear()
+        nest_protector_ids.extend([str(uid) for uid in data["nest_protector_ids"]])
         
     save_state()
     # Force a refresh of the embed so it updates instantly
