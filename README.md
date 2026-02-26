@@ -1,6 +1,6 @@
-# Discord Attendance Bot
+# Discord Oath Scheduler
 
-A Discord bot for managing session sign-ups with persistent attendance tracking.
+A Discord bot for managing session sign-ups and custom Oath scheduling.
 
 ## Features
 

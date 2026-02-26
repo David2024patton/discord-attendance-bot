@@ -1,0 +1,74 @@
+[
+    {
+        "id": "acrocanthosaurus_divine_beasts",
+        "name": "Acrocanthosaurus (Divine Beasts)",
+        "type": "carnivore",
+        "lore": "A creature belonging to the carnivore family.",
+        "cw": 3000,
+        "hp": 500,
+        "atk": 50,
+        "armor": 1.0,
+        "spd": 500,
+        "img_url": "https://static.wikia.nocookie.net/path-of-titans/images/b/bc/PathOfTitans-Win64-Shipping_Screenshot_2023.02.19_-_01.33.35.69.png"
+    },
+    {
+        "id": "ampelosaurus_divine_beasts",
+        "name": "Ampelosaurus (Divine Beasts)",
+        "type": "carnivore",
+        "lore": "A creature belonging to the carnivore family.",
+        "cw": 3000,
+        "hp": 500,
+        "atk": 50,
+        "armor": 1.0,
+        "spd": 500,
+        "img_url": "https://static.wikia.nocookie.net/path-of-titans/images/0/0f/Ampelo_Mod_Divine_Icon.png"
+    },
+    {
+        "id": "carcharodontosaurus_divine_beasts",
+        "name": "Carcharodontosaurus (Divine Beasts)",
+        "type": "carnivore",
+        "lore": "A creature belonging to the carnivore family.",
+        "cw": 3000,
+        "hp": 500,
+        "atk": 50,
+        "armor": 1.0,
+        "spd": 500,
+        "img_url": "https://static.wikia.nocookie.net/path-of-titans/images/7/78/Carcharodontosaurus_Path_of_Titans_Divine_Beasts.png"
+    },
+    {
+        "id": "giganotosaurus_primordial_tyrants",
+        "name": "Giganotosaurus (Primordial Tyrants)",
+        "type": "carnivore",
+        "lore": "A creature belonging to the carnivore family.",
+        "cw": 3000,
+        "hp": 500,
+        "atk": 50,
+        "armor": 1.0,
+        "spd": 500,
+        "img_url": "https://static.wikia.nocookie.net/path-of-titans/images/e/ee/PT_Giganoto_mod_icon.png"
+    },
+    {
+        "id": "ophis_primordial_tyrants",
+        "name": "Ophis (Primordial Tyrants)",
+        "type": "carnivore",
+        "lore": "A creature belonging to the carnivore family.",
+        "cw": 3000,
+        "hp": 500,
+        "atk": 50,
+        "armor": 1.0,
+        "spd": 500,
+        "img_url": null
+    },
+    {
+        "id": "squalicorax_archetypes",
+        "name": "Squalicorax (Archetypes)",
+        "type": "carnivore",
+        "lore": "A creature belonging to the carnivore family.",
+        "cw": 3000,
+        "hp": 500,
+        "atk": 50,
+        "armor": 1.0,
+        "spd": 500,
+        "img_url": "https://static.wikia.nocookie.net/path-of-titans/images/5/5c/Squalicoraxicon.png"
+    }
+]

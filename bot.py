@@ -1214,7 +1214,7 @@ def _render_vs_image(dino_a, dino_b):
         font_med = ImageFont.load_default()
         font_vs = ImageFont.load_default()
 
-    def draw_card(x_offset, bg_color, dino):
+    def draw_card(x_offset, bg_color, dino, side="left"):
         # Card Background
         draw.rectangle(
             [(x_offset, PADDING), (x_offset + CARD_WIDTH, PADDING + CARD_HEIGHT)],
@@ -1223,7 +1223,7 @@ def _render_vs_image(dino_a, dino_b):
         
         # Check if custom frame exists
         frame_exists = False
-        frame_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "frames", f"{dino['id']}.png")
+        frame_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "frames", f"{side}_frame.png")
         if os.path.exists(frame_path):
             frame_exists = True
         
@@ -1303,7 +1303,7 @@ def _render_vs_image(dino_a, dino_b):
             stats_y += stat_pad
 
     # Draw Card A
-    draw_card(PADDING, CARD_BG_A, dino_a)
+    draw_card(PADDING, CARD_BG_A, dino_a, "left")
 
     # Draw VS text in the center
     vs_x = PADDING + CARD_WIDTH + (PADDING // 2) - 15
@@ -1311,7 +1311,7 @@ def _render_vs_image(dino_a, dino_b):
     draw.text((vs_x, vs_y), "VS", fill=(231, 76, 60), font=font_vs)
 
     # Draw Card B
-    draw_card(PADDING * 2 + CARD_WIDTH, CARD_BG_B, dino_b)
+    draw_card(PADDING * 2 + CARD_WIDTH, CARD_BG_B, dino_b, "right")
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")

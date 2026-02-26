@@ -22,6 +22,51 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Wildcats@4113")
 SESSION_TOKENS = {}      # token -> expiry
 TOKEN_TTL = 86400        # 24h
 
+# ── User Name Cache (prevents sequential Discord API hangs) ──────
+_name_cache = {}       # uid -> (name, timestamp)
+_NAME_CACHE_TTL = 300  # 5 minutes
+
+async def _resolve_name(uid):
+    """Resolve a user ID to display name, with 5-minute cache."""
+    now = time.time()
+    cached = _name_cache.get(uid)
+    if cached and (now - cached[1]) < _NAME_CACHE_TTL:
+        return cached[0]
+    if bot_ref:
+        try:
+            u = await bot_ref.fetch_user(int(uid))
+            name = u.display_name
+            _name_cache[uid] = (name, now)
+            return name
+        except:
+            pass
+    return str(uid)
+
+async def _resolve_names(uids):
+    """Batch resolve multiple user IDs. Uses cache for speed."""
+    results = {}
+    to_fetch = []
+    now = time.time()
+    for uid in uids:
+        cached = _name_cache.get(uid)
+        if cached and (now - cached[1]) < _NAME_CACHE_TTL:
+            results[uid] = cached[0]
+        else:
+            to_fetch.append(uid)
+    # Fetch uncached in parallel-ish
+    for uid in to_fetch:
+        if bot_ref:
+            try:
+                u = await bot_ref.fetch_user(int(uid))
+                name = u.display_name
+                _name_cache[uid] = (name, now)
+                results[uid] = name
+            except:
+                results[uid] = str(uid)
+        else:
+            results[uid] = str(uid)
+    return results
+
 def register_state_getters(getters: dict):
     """Called by bot.py to register functions that return current bot state."""
     global _state_getters
@@ -69,29 +114,32 @@ CSS = """
     --sidebar-w: 240px; --sidebar-collapsed: 60px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; min-height: 100vh; display: flex; }
+body { background: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif; min-height: 100vh; display: flex; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 /* Sidebar */
-.sidebar { width: var(--sidebar-w); min-height: 100vh; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 200; transition: width 0.25s ease; overflow: hidden; }
+.sidebar { width: var(--sidebar-w); min-height: 100vh; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 200; transition: width 0.25s ease; overflow: hidden; box-shadow: 2px 0 10px rgba(0,0,0,0.2); }
 .sidebar.collapsed { width: var(--sidebar-collapsed); }
-.sidebar-header { padding: 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); min-height: 56px; }
-.sidebar-brand { font-size: 17px; font-weight: 700; color: var(--text-bright); white-space: nowrap; overflow: hidden; }
+.sidebar-header { padding: 24px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); min-height: 72px; }
+.sidebar-brand { font-size: 18px; font-weight: 800; color: var(--text-bright); white-space: nowrap; overflow: hidden; letter-spacing: -0.3px; }
 .sidebar-brand span { color: var(--accent); }
 .sidebar.collapsed .sidebar-brand { display: none; }
-.toggle-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 20px; padding: 4px 6px; border-radius: var(--radius); transition: all 0.15s; flex-shrink: 0; }
-.toggle-btn:hover { background: var(--bg3); color: var(--text-bright); }
-.sidebar-nav { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
-.sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius); color: var(--text-dim); font-weight: 500; font-size: 14px; transition: all 0.15s; white-space: nowrap; overflow: hidden; text-decoration: none; }
-.sidebar-nav a:hover { background: var(--bg3); color: var(--text-bright); text-decoration: none; }
-.sidebar-nav a.active { background: rgba(88,101,242,0.15); color: var(--accent); }
-.sidebar-nav a .icon { font-size: 18px; min-width: 24px; text-align: center; flex-shrink: 0; }
-.sidebar-nav a .label { overflow: hidden; }
+.toggle-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 18px; padding: 6px; border-radius: 6px; transition: all 0.2s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; opacity: 0.7; }
+.toggle-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-bright); opacity: 1; }
+.sidebar-nav { flex: 1; padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
+.sidebar-nav-title { font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700; letter-spacing: 0.8px; padding: 8px 12px 4px; opacity: 0.6; }
+.sidebar.collapsed .sidebar-nav-title { display: none; }
+.sidebar-nav a { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 8px; color: var(--text-dim); font-weight: 500; font-size: 14px; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); white-space: nowrap; overflow: hidden; text-decoration: none; border: 1px solid transparent; }
+.sidebar-nav a:hover { background: rgba(255,255,255,0.03); color: var(--text-bright); transform: translateX(2px); }
+.sidebar-nav a.active { background: rgba(88,101,242,0.1); color: var(--accent); border: 1px solid rgba(88,101,242,0.2); box-shadow: 0 4px 12px rgba(0,0,0,0.1); font-weight: 600; }
+.sidebar-nav a .icon { font-size: 16px; min-width: 24px; text-align: center; flex-shrink: 0; opacity: 0.8; transition: opacity 0.2s; }
+.sidebar-nav a:hover .icon, .sidebar-nav a.active .icon { opacity: 1; }
+.sidebar-nav a .label { overflow: hidden; transition: opacity 0.2s; }
 .sidebar.collapsed .sidebar-nav a .label { display: none; }
-.sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
-.sidebar-footer a { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--radius); color: var(--text-dim); font-size: 13px; transition: all 0.15s; text-decoration: none; }
-.sidebar-footer a:hover { background: var(--bg3); color: var(--red); text-decoration: none; }
+.sidebar-footer { padding: 16px 12px; border-top: 1px solid var(--border); background: rgba(0,0,0,0.1); }
+.sidebar-footer a { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; transition: all 0.2s; text-decoration: none; }
+.sidebar-footer a:hover { background: rgba(240,71,71,0.1); color: var(--red); }
 .sidebar-footer a .icon { font-size: 16px; min-width: 24px; text-align: center; flex-shrink: 0; }
 .sidebar.collapsed .sidebar-footer a .label { display: none; }
 
@@ -107,12 +155,19 @@ a:hover { text-decoration: underline; }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 
 /* Cards */
-.card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 20px; transition: transform 0.2s, box-shadow 0.2s; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
 .card-header { font-size: 13px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; letter-spacing: 0.5px; margin-bottom: 12px; }
 .card-value { font-size: 32px; font-weight: 700; color: var(--text-bright); }
 .card-value.green { color: var(--green); }
 .card-value.red { color: var(--red); }
 .card-value.orange { color: var(--orange); }
+
+/* Clickable dino card */
+.dino-card { cursor: pointer; border-top: 3px solid var(--border); position: relative; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.dino-card:hover { border-color: var(--accent); box-shadow: 0 8px 30px rgba(88,101,242,0.15); transform: translateY(-4px); }
+.dino-card .card-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
+.dino-card:hover .card-actions { opacity: 1; }
 
 /* Tables */
 table { width: 100%; border-collapse: collapse; }
@@ -302,20 +357,23 @@ def _sidebar(active="home"):
     return f"""
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <button class="toggle-btn" id="toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
-            <div class="sidebar-brand">🎯 <span>Attendance</span></div>
+            <button class="toggle-btn" id="toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar">❖</button>
+            <div class="sidebar-brand">Oath <span>Scheduler</span></div>
         </div>
         <nav class="sidebar-nav">
-            <a href="/" class="{cls('home')}"><span class="icon">📊</span><span class="label">Dashboard</span></a>
+            <div class="sidebar-nav-title">General</div>
+            <a href="/" class="{cls('home')}"><span class="icon">⊞</span><span class="label">Dashboard</span></a>
             <a href="/calendar" class="{cls('calendar')}"><span class="icon">📅</span><span class="label">Calendar</span></a>
             <a href="/users" class="{cls('users')}"><span class="icon">👥</span><span class="label">Users</span></a>
-            <a href="/logs" class="{cls('logs')}"><span class="icon">📋</span><span class="label">Logs</span></a>
-            <a href="/battle" class="{cls('battle')}"><span class="icon">🦖</span><span class="label">Battle Cards</span></a>
-            <a href="/dinolb" class="{cls('dinolb')}"><span class="icon">🏆</span><span class="label">Dino Stats</span></a>
-            <a href="/settings" class="{cls('settings')}"><span class="icon">⚙️</span><span class="label">Settings</span></a>
+            
+            <div class="sidebar-nav-title" style="margin-top:10px">System</div>
+            <a href="/battle" class="{cls('battle')}"><span class="icon">⚔️</span><span class="label">Battle Cards</span></a>
+            <a href="/dinolb" class="{cls('dinolb')}"><span class="icon">🏆</span><span class="label">Leaderboard</span></a>
+            <a href="/logs" class="{cls('logs')}"><span class="icon">▤</span><span class="label">System Logs</span></a>
+            <a href="/settings" class="{cls('settings')}"><span class="icon">⚙</span><span class="label">Settings</span></a>
         </nav>
         <div class="sidebar-footer">
-            <a href="/logout"><span class="icon">🚪</span><span class="label">Logout</span></a>
+            <a href="/logout"><span class="icon">⎋</span><span class="label">Secure Logout</span></a>
         </div>
     </aside>"""
 
@@ -323,7 +381,9 @@ def _page(title, content, active="home"):
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} — Attendance Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<title>{title} — Oath Scheduler</title>
 <style>{CSS}</style>
 </head><body>
 {_sidebar(active)}
@@ -337,16 +397,16 @@ def _page(title, content, active="home"):
 LOGIN_PAGE = f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Login — Attendance Admin</title>
+<title>Login — Oath Scheduler</title>
 <style>{CSS}</style>
 </head><body>
 <div class="login-wrap">
     <div class="login-box">
-        <h2>🎯 Attendance Admin</h2>
-        <div class="login-error" id="err">Invalid password</div>
+        <h2>❖ Oath Scheduler</h2>
+        <div class="login-error" id="err">Invalid credentials</div>
         <form method="POST" action="/login">
-            <input type="password" name="password" placeholder="Admin password" autofocus required>
-            <button type="submit" class="btn btn-primary">Sign In</button>
+            <input type="password" name="password" placeholder="Administrator Password" autofocus required>
+            <button type="submit" class="btn btn-primary" style="letter-spacing:0.5px">AUTHENTICATE</button>
         </form>
     </div>
 </div>
@@ -417,28 +477,20 @@ async def dashboard_home(request):
         status_dot = "dot-red"
         status_text = "No Active Session"
 
-    # User name resolver
-    async def get_name(uid):
-        if bot_ref:
-            try:
-                u = await bot_ref.fetch_user(uid)
-                return u.display_name
-            except:
-                pass
-        return str(uid)
-
-    # Build attending list HTML
+    # Build attending list HTML (CACHED - no more API lag)
+    attend_names = await _resolve_names(attending)
     attend_html = ""
     for uid in attending:
-        name = await get_name(uid)
+        name = attend_names.get(uid, str(uid))
         check = ' <span style="color:var(--green)">✅</span>' if uid in checked_in else ""
         attend_html += f'<li><span class="dot dot-green"></span>{name}{check}</li>'
     if not attend_html:
         attend_html = '<li style="color:var(--text-dim)">No one yet</li>'
 
+    standby_names = await _resolve_names(standby)
     standby_html = ""
     for uid in standby:
-        name = await get_name(uid)
+        name = standby_names.get(uid, str(uid))
         standby_html += f'<li><span class="dot dot-orange"></span>{name}</li>'
     if not standby_html:
         standby_html = '<li style="color:var(--text-dim)">Empty</li>'
@@ -494,14 +546,8 @@ async def users_page(request):
         best = stats.get("best_streak", 0)
         rate = (attended / total * 100) if total > 0 else 0
 
-        # Name resolution
-        name = uid_str
-        if bot_ref:
-            try:
-                u = await bot_ref.fetch_user(int(uid_str))
-                name = u.display_name
-            except:
-                pass
+        # Name resolution (CACHED)
+        name = await _resolve_name(uid_str)
 
         rate_cls = "badge-green" if rate >= 80 else ("badge-orange" if rate >= 50 else "badge-red")
         ns_cls = "badge-red" if no_shows > 0 else "badge-green"
@@ -622,13 +668,7 @@ async def dinolb_page(request):
         streak = stats.get("streak", 0)
         best = stats.get("best_streak", 0)
         
-        name = uid_str
-        if bot_ref:
-            try:
-                u = await bot_ref.fetch_user(int(uid_str))
-                name = u.display_name
-            except:
-                pass
+        name = await _resolve_name(uid_str)
 
         rows += f"""<tr>
             <td><strong>#{rank}</strong></td>
@@ -677,33 +717,64 @@ async def battle_page(request):
         bg_col = "var(--red)" if d['type'] == 'carnivore' else "var(--green)"
         safe_name = str(d['name']).replace('"', '&quot;')
         safe_id = str(d['id']).replace('"', '&quot;')
+        lore_preview = str(d.get('lore', '')).replace('"', '&quot;')[:60]
+        if lore_preview:
+            lore_preview += '...'
+        else:
+            lore_preview = 'No lore set'
         
         cards_html += f"""
-        <div class="card" style="border-top:3px solid {bg_col};position:relative">
-            <button class="btn btn-danger btn-sm" style="position:absolute;top:8px;right:8px;padding:2px 8px" onclick="deleteCard('{safe_id}', '{safe_name}')">X</button>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                <div style="font-weight:bold;font-size:16px;">{safe_name}</div>
-                <div class="badge badge-orange">{d['type'].upper()}</div>
+        <div class="card dino-card" style="border-top-color:{bg_col}" onclick="window.location='/dino/{safe_id}'">
+            <div class="card-actions">
+                <button class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteCard('{safe_id}', '{safe_name}')">Delete</button>
             </div>
-            <div style="color:var(--text-dim);font-size:12px">ID: {safe_id}</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-                <div>💥 CW: <strong style="color:var(--text-bright)">{d.get('cw', 3000)}</strong></div>
-                <div>❤️ HP: <strong style="color:var(--green)">{d.get('hp', 500)}</strong></div>
-                <div>⚔️ ATK: <strong style="color:var(--red)">{d.get('atk', 50)}</strong></div>
-                <div>🛡️ DEF: <strong style="color:var(--blue)">{d.get('armor', 1.0)}</strong></div>
-                <div>⚡ SPD: <strong style="color:#f1c40f">{d.get('spd', 500)}</strong></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                <div style="font-weight:700;font-size:16px;color:var(--text-bright)">{safe_name}</div>
+                <div class="badge" style="background:rgba({'240,71,71' if d['type']=='carnivore' else '67,181,129'},0.2);color:{bg_col};font-size:11px">{d['type'].upper()}</div>
+            </div>
+            <div style="color:var(--text-dim);font-size:12px;margin-bottom:12px;font-style:italic">{lore_preview}</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:13px">
+                <div>CW <strong style="color:var(--text-bright)">{d.get('cw', 3000)}</strong></div>
+                <div>HP <strong style="color:var(--green)">{d.get('hp', 500)}</strong></div>
+                <div>ATK <strong style="color:var(--red)">{d.get('atk', 50)}</strong></div>
+                <div>DEF <strong style="color:var(--accent)">{d.get('armor', 1.0)}</strong></div>
+                <div>SPD <strong style="color:#f1c40f">{d.get('spd', 500)}</strong></div>
             </div>
         </div>
         """
 
     if not cards_html:
-        cards_html = '<div style="color:var(--text-dim);width:100%;text-align:center">No cards found. Upload one below.</div>'
+        cards_html = '<div style="color:var(--text-dim);width:100%;text-align:center;padding:40px">No dinosaur profiles yet. Create one below.</div>'
 
     content = f"""
     <div class="container">
+        <!-- Global Frames Upload Module -->
+        <div class="card" style="margin-bottom:24px;border-left:4px solid var(--accent)">
+            <h3 style="margin-bottom:12px">⚔️ Global Battle Frames</h3>
+            <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">Upload a specific transparent layout overlay for the Left (Attacker) and Right (Defender) cards. All Dinosaur profiles will automatically use these two master frames during combat generation.</p>
+            <div class="grid grid-2" style="gap:16px">
+                <form id="leftFrameForm" enctype="multipart/form-data">
+                    <div style="background:var(--bg3);padding:16px;border-radius:var(--radius);border:1px dashed var(--border)">
+                        <h4 style="margin-bottom:8px;color:var(--text-bright)">Card A (Left)</h4>
+                        <input type="hidden" name="side" value="left">
+                        <input type="file" name="frame" accept="image/png" required style="width:100%;margin-bottom:12px;font-size:13px">
+                        <button type="submit" class="btn btn-primary btn-sm" style="width:100%" id="leftFrameBtn">Upload Left Frame</button>
+                    </div>
+                </form>
+                <form id="rightFrameForm" enctype="multipart/form-data">
+                    <div style="background:var(--bg3);padding:16px;border-radius:var(--radius);border:1px dashed var(--border)">
+                        <h4 style="margin-bottom:8px;color:var(--text-bright)">Card B (Right)</h4>
+                        <input type="hidden" name="side" value="right">
+                        <input type="file" name="frame" accept="image/png" required style="width:100%;margin-bottom:12px;font-size:13px">
+                        <button type="submit" class="btn btn-primary btn-sm" style="width:100%" id="rightFrameBtn">Upload Right Frame</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <h2 style="color:var(--text-bright);margin:0">🦖 Dinosaur Roster ({len(all_dinos)})</h2>
-            <button class="btn btn-success" onclick="document.getElementById('uploadModal').classList.add('active')">+ Upload Card</button>
+            <h2 style="color:var(--text-bright);margin:0">🦖 Dinosaur Profiles ({len(all_dinos)})</h2>
+            <button class="btn btn-success" onclick="document.getElementById('uploadModal').classList.add('active')">+ Create Profile</button>
         </div>
         
         <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));gap:16px">
@@ -715,20 +786,16 @@ async def battle_page(request):
     <div class="modal-overlay" id="uploadModal">
         <div class="modal" style="width:550px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                <h3 style="margin:0">Upload Custom Dinosaur</h3>
+                <h3 style="margin:0">Create Dinosaur Profile</h3>
                 <button class="btn btn-secondary btn-sm" onclick="randomizeStats()" style="background:var(--accent);color:white;border:none" title="Generate authentic Path of Titans stats mapped to Diet">🎲 Random Stats</button>
             </div>
-            <p style="color:var(--text-dim);margin-bottom:16px;font-size:13px;line-height:1.4">Create a custom creature. You can upload an optional Custom Frame and a Dino Photo. Ensure stats reflect authentic Path of Titans CW/Health scales.</p>
+            <p style="color:var(--text-dim);margin-bottom:16px;font-size:13px;line-height:1.4">Create a custom creature profile. Upload a character portrait ('Avatar') and define their base combat statistics.</p>
             
             <form id="uploadForm" enctype="multipart/form-data">
                 <div class="grid grid-2" style="gap:12px;margin-bottom:12px">
-                    <div class="form-group">
-                        <label>Avatar / Dino Photo (PNG/JPG):</label>
+                    <div class="form-group" style="grid-column:span 2">
+                        <label>Character Avatar (PNG/JPG):</label>
                         <input type="file" id="imageFile" name="image" accept="image/*" required style="width:100%;padding:7px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)">
-                    </div>
-                    <div class="form-group">
-                        <label>Custom Card Frame (Op. PNG):</label>
-                        <input type="file" id="frameFile" name="frame" accept="image/png" style="width:100%;padding:7px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)">
                     </div>
                 </div>
 
@@ -828,6 +895,33 @@ async def battle_page(request):
         document.getElementById('dinoSPD').value = spd;
     }}
 
+    async function uploadGlobalFrame(e, formId, btnId) {{
+        e.preventDefault();
+        const btn = document.getElementById(btnId);
+        btn.disabled = true;
+        btn.textContent = "Uploading...";
+        try {{
+            const formData = new FormData(e.target);
+            const r = await fetch('/api/upload-global-frame', {{
+                method: 'POST', body: formData
+            }});
+            const data = await r.json();
+            if(data.ok) {{
+                showToast("Global Frame uploaded successfully!");
+                btn.textContent = "Uploaded!";
+            }} else {{
+                alert("Error: " + data.error);
+                btn.textContent = "Upload Frame";
+            }}
+        }} catch(err) {{
+            alert(err);
+            btn.textContent = "Upload Frame";
+        }}
+        btn.disabled = false;
+    }}
+    document.getElementById('leftFrameForm').addEventListener('submit', (e) => uploadGlobalFrame(e, 'leftFrameForm', 'leftFrameBtn'));
+    document.getElementById('rightFrameForm').addEventListener('submit', (e) => uploadGlobalFrame(e, 'rightFrameForm', 'rightFrameBtn'));
+
     document.getElementById('uploadForm').onsubmit = async (e) => {{
         e.preventDefault();
         const btn = document.getElementById('uploadBtn');
@@ -874,6 +968,164 @@ async def battle_page(request):
     </script>
     """
     return web.Response(text=_page("Battle Cards", content, "battle"), content_type="text/html")
+
+# ── Dino Profile Page ────────────────────────────────────────────
+@routes.get("/dino/{dino_id}")
+async def dino_profile_page(request):
+    if not _check_auth(request):
+        raise web.HTTPFound("/login")
+
+    dino_id = request.match_info["dino_id"]
+    load_dinos = _state_getters.get("load_dinos")
+    if not load_dinos:
+        raise web.HTTPFound("/battle")
+
+    all_dinos = load_dinos()
+    dino = None
+    for d in all_dinos:
+        if d['id'] == dino_id:
+            dino = d
+            break
+
+    if not dino:
+        raise web.HTTPFound("/battle")
+
+    bg_col = "var(--red)" if dino['type'] == 'carnivore' else "var(--green)"
+    diet_label = dino['type'].capitalize()
+    lore = dino.get('lore', '')
+    safe_lore = str(lore).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+    # Build stat bars
+    stat_defs = [
+        ("Combat Weight", "cw", dino.get('cw', 3000), 10000, "#9b59b6"),
+        ("Health", "hp", dino.get('hp', 500), 1500, "#2ecc71"),
+        ("Attack", "atk", dino.get('atk', 50), 200, "#e74c3c"),
+        ("Defense", "armor", dino.get('armor', 1.0), 3.0, "#3498db"),
+        ("Speed", "spd", dino.get('spd', 500), 1500, "#f1c40f"),
+    ]
+
+    stats_html = ""
+    for label, key, val, max_val, color in stat_defs:
+        pct = min(100, int((float(val) / max_val) * 100))
+        stats_html += f"""
+        <div style="margin-bottom:16px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <span style="font-size:13px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px">{label}</span>
+                <span style="font-size:15px;font-weight:700;color:var(--text-bright)">{val}</span>
+            </div>
+            <div style="background:var(--bg);border-radius:6px;height:10px;overflow:hidden">
+                <div style="width:{pct}%;height:100%;background:linear-gradient(90deg,{color},{color}88);border-radius:6px;transition:width 1s ease"></div>
+            </div>
+        </div>"""
+
+    # Check if avatar exists
+    avatar_url = f"/assets/dinos/{dino_id}.png"
+
+    content = f"""
+    <div class="container" style="max-width:800px">
+        <div style="margin-bottom:20px">
+            <a href="/battle" style="color:var(--text-dim);font-size:13px;text-decoration:none;display:inline-flex;align-items:center;gap:6px">
+                <span>\u2190</span> Back to Roster
+            </a>
+        </div>
+
+        <div class="card" style="border-top:4px solid {bg_col};overflow:visible">
+            <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+                <!-- Avatar -->
+                <div style="flex-shrink:0">
+                    <div style="width:180px;height:180px;border-radius:12px;background:var(--bg);border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center">
+                        <img src="{avatar_url}" alt="{dino['name']}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\\'color:var(--text-dim);font-size:12px;text-align:center\\'>No Avatar</div>'">
+                    </div>
+                </div>
+
+                <!-- Name & Info -->
+                <div style="flex:1;min-width:200px">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                        <h2 style="margin:0;font-size:28px;font-weight:800;color:var(--text-bright)">{dino['name']}</h2>
+                        <span class="badge" style="background:rgba({'240,71,71' if dino['type']=='carnivore' else '67,181,129'},0.2);color:{bg_col};font-size:12px;padding:4px 10px">{diet_label}</span>
+                    </div>
+                    <div style="color:var(--text-dim);font-size:13px;margin-bottom:16px">ID: {dino_id}</div>
+
+                    <div class="form-group">
+                        <label>Lore / Description</label>
+                        <textarea id="loreInput" rows="4" style="width:100%;resize:vertical;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 14px;font-family:inherit;font-size:14px">{safe_lore}</textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Card -->
+        <div class="card" style="margin-top:20px">
+            <h3 style="margin-bottom:20px;font-weight:700;color:var(--text-bright)">Combat Statistics</h3>
+            {stats_html}
+        </div>
+
+        <!-- Actions -->
+        <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">
+            <button class="btn btn-primary" id="saveProfileBtn" onclick="saveProfile()">Save Changes</button>
+            <button class="btn btn-danger" onclick="if(confirm('Delete {dino['name']}?')){{fetch('/api/delete-card',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{id:'{dino_id}'}})}}).then(()=>window.location='/battle')}}">Delete Profile</button>
+        </div>
+    </div>
+
+    <script>
+    async function saveProfile() {{
+        const btn = document.getElementById('saveProfileBtn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {{
+            const r = await fetch('/api/update-dino-profile', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{
+                    id: '{dino_id}',
+                    lore: document.getElementById('loreInput').value
+                }})
+            }});
+            const data = await r.json();
+            if (data.ok) {{
+                btn.textContent = 'Saved!';
+                setTimeout(() => btn.textContent = 'Save Changes', 2000);
+            }} else {{
+                alert(data.error);
+                btn.textContent = 'Save Changes';
+            }}
+        }} catch(err) {{
+            alert(err);
+            btn.textContent = 'Save Changes';
+        }}
+        btn.disabled = false;
+    }}
+    </script>
+    """
+
+    return web.Response(text=_page(dino['name'] + " Profile", content, "battle"), content_type="text/html")
+
+# ── API: Update Dino Profile ─────────────────────────────────────
+@routes.post("/api/update-dino-profile")
+async def api_update_dino_profile(request):
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    data = await request.json()
+    dino_id = data.get("id")
+    if not dino_id:
+        return web.json_response({"error": "Missing ID"}, status=400)
+
+    load_dinos = _state_getters.get("load_dinos")
+    save_dinos = _state_getters.get("save_dinos")
+    if not load_dinos or not save_dinos:
+        return web.json_response({"error": "Bot hooks missing"}, status=500)
+
+    all_dinos = load_dinos()
+    for d in all_dinos:
+        if d['id'] == dino_id:
+            if 'lore' in data:
+                d['lore'] = data['lore']
+            save_dinos(all_dinos)
+            await push_log(f"\ud83e\udd96 Dashboard: Updated profile for {d['name']}")
+            return web.json_response({"ok": True})
+
+    return web.json_response({"error": "Dino not found"}, status=404)
 
 # ── Settings Page ────────────────────────────────────────────────
 @routes.get("/settings")
@@ -1432,6 +1684,12 @@ CALENDAR_CSS = """
 .k-time { font-size: 12px; color: var(--text-dim); }
 .k-edit-btn { position:absolute; top:8px; right:8px; font-size:12px; background:none; border:none; color:var(--text-dim); cursor:pointer; padding:2px; z-index:5; }
 .k-edit-btn:hover { color:var(--text-bright); }
+.k-actions { position:absolute; top:6px; right:6px; display:flex; gap:2px; opacity:0; transition:opacity 0.2s; z-index:5; }
+.k-card:hover .k-actions { opacity:1; }
+.k-act-btn { background:none; border:none; cursor:pointer; font-size:11px; padding:3px 4px; border-radius:4px; transition:background 0.15s; }
+.k-act-btn:hover { background:rgba(255,255,255,0.1); }
+.k-act-del:hover { background:rgba(240,71,71,0.2); }
+.k-subtitle { font-size:11px; color:var(--text-dim); opacity:0.7; font-style:italic; }
 .k-add { padding:8px; margin:0 10px 10px; border:1px dashed var(--border); text-align:center; color:var(--text-dim); cursor:pointer; font-size:12px; font-weight:600; border-radius:6px; transition:0.2s; }
 .k-add:hover { background:rgba(255,255,255,0.05); color:var(--text-bright); border-color:var(--text-dim); }
 
@@ -1512,22 +1770,13 @@ async def calendar_page(request):
     standby_ids = g.get("standby_ids", lambda: [])()
     checked_in_ids = g.get("checked_in_ids", lambda: set())()
 
-    # Resolve attendee names
+    # Resolve attendee names (CACHED - no more API lag)
     attendees = []
-    async def get_name(uid):
-        if bot_ref:
-            try:
-                u = await bot_ref.fetch_user(uid)
-                return u.display_name
-            except:
-                pass
-        return str(uid)
-
     for uid in attending_ids:
-        name = await get_name(uid)
+        name = await _resolve_name(uid)
         attendees.append({"id": uid, "name": name, "checked_in": uid in checked_in_ids, "status": "attending"})
     for uid in standby_ids:
-        name = await get_name(uid)
+        name = await _resolve_name(uid)
         attendees.append({"id": uid, "name": name, "checked_in": False, "status": "standby"})
 
     current_session = {
@@ -1618,6 +1867,15 @@ async def calendar_page(request):
                 <option value="2">Wednesday</option><option value="3">Thursday</option>
                 <option value="4">Friday</option><option value="5">Saturday</option>
                 <option value="6">Sunday</option>
+            </select>
+            <label>Event Type</label>
+            <select id="recType">
+                <option value="Hunt">Hunt</option>
+                <option value="Nesting">Nesting</option>
+                <option value="Growth">Growth</option>
+                <option value="PvP">PvP</option>
+                <option value="Migration">Migration</option>
+                <option value="Session">General Session</option>
             </select>
             <label>Session Hour (24h)</label>
             <select id="recHour">{hour_options_full}</select>
@@ -1773,10 +2031,18 @@ async def calendar_page(request):
             
             sessionDays.forEach(function(sd, idx) {
                 if (sd.weekday === i) {
+                    const evType = sd.type || 'Session';
+                    const typeEmoji = {'Hunt':'\ud83e\uddb4','Nesting':'\ud83e\udd5a','Growth':'\ud83c\udf31','PvP':'\u2694\ufe0f','Migration':'\ud83c\udf0d'};
+                    const emoji = typeEmoji[evType] || '\ud83d\udcc5';
                     html += '<div class="k-card" draggable="true" ondragstart="handleDragStart(event, ' + idx + ')">';
-                    html += '<button class="k-edit-btn" onclick="openEditRecurring(event, '+idx+')">✏️</button>';
-                    html += '<div class="k-title">' + (sd.name || 'Session') + '</div>';
-                    html += '<div class="k-time">⏰ ' + String(sd.hour).padStart(2,'0') + ':00</div>';
+                    html += '<div class="k-actions">';
+                    html += '<button class="k-act-btn" title="Edit" onclick="event.stopPropagation();openEditRecurring(event, '+idx+')">\u270f\ufe0f</button>';
+                    html += '<button class="k-act-btn" title="Duplicate" onclick="event.stopPropagation();duplicateRecurring('+idx+')">\ud83d\udccb</button>';
+                    html += '<button class="k-act-btn k-act-del" title="Delete" onclick="event.stopPropagation();deleteRecurring('+idx+')">\ud83d\uddd1\ufe0f</button>';
+                    html += '</div>';
+                    html += '<div class="k-title">' + emoji + ' ' + evType + '</div>';
+                    html += '<div class="k-time">\u23f0 ' + String(sd.hour).padStart(2,'0') + ':00</div>';
+                    if (sd.name && sd.name !== evType) html += '<div class="k-subtitle">' + sd.name + '</div>';
                     html += '</div>';
                 }
             });
@@ -2031,21 +2297,41 @@ async def calendar_page(request):
         const weekday = parseInt(document.getElementById('recWeekday').value);
         const hour = parseInt(document.getElementById('recHour').value);
         const post_hours_before = parseInt(document.getElementById('recPostBefore').value);
+        const evType = document.getElementById('recType').value;
         const WDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-        const name = WDAYS[weekday];
+        const name = evType;
 
         fetch('/api/session-days', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ weekday: weekday, hour: hour, name: name, post_hours_before: post_hours_before })
+            body: JSON.stringify({ weekday: weekday, hour: hour, name: name, post_hours_before: post_hours_before, type: evType })
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.ok) {
                 sessionDays = d.days;
                 closeModal('recurringModal');
                 renderAll();
-                showToast('Added recurring: ' + name + ' at ' + String(hour).padStart(2,'0') + ':00');
+                showToast('Added recurring: ' + evType + ' at ' + String(hour).padStart(2,'0') + ':00');
             } else { alert(d.error || 'Failed'); }
         });
+    }
+
+    function duplicateRecurring(idx) {
+        const sd = sessionDays[idx];
+        fetch('/api/session-days', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ weekday: sd.weekday, hour: sd.hour, name: sd.name || 'Session', post_hours_before: sd.post_hours_before || 12, type: sd.type || 'Session' })
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.ok) {
+                sessionDays = d.days;
+                renderAll();
+                showToast('Duplicated event!');
+            } else { alert(d.error || 'Failed'); }
+        });
+    }
+
+    function deleteRecurring(idx) {
+        removeRecurring(idx);
     }
 
     function removeRecurring(index) {
@@ -2532,6 +2818,44 @@ async def api_test_status_msg(request):
         await push_log(f"❌ Test status message error: {e}")
         return web.json_response({"error": str(e)}, status=500)
 
+@routes.post("/api/upload-global-frame")
+async def api_upload_global_frame(request):
+    """Handle multipart global card frame uploads (Left/Right)."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    import os
+    reader = await request.multipart()
+    side = "left"
+    frame_data = None
+    
+    while True:
+        field = await reader.next()
+        if field is None:
+            break
+        if field.name == 'side':
+            side = (await field.read()).decode('utf-8').strip()
+        elif field.name == 'frame':
+            val = await field.read()
+            if val:
+                frame_data = val
+                
+    if not frame_data or side not in ["left", "right"]:
+        return web.json_response({"error": "Missing valid frame or side parameter."}, status=400)
+        
+    assets_dir = os.path.join(os.path.dirname(__file__), "assets", "dinos", "frames")
+    os.makedirs(assets_dir, exist_ok=True)
+    frame_path = os.path.join(assets_dir, f"{side}_frame.png")
+    
+    try:
+        with open(frame_path, 'wb') as f:
+            f.write(frame_data)
+        await push_log(f"🎯 Dashboard: Uploaded Global {side.title()} Frame to {frame_path}")
+    except Exception as e:
+        return web.json_response({"error": f"Failed to save frame: {e}"}, status=500)
+        
+    return web.json_response({"ok": True})
+
 @routes.post("/api/upload-card")
 async def api_upload_card(request):
     """Handle multipart avatar uploads and new stat generation."""
@@ -2544,7 +2868,6 @@ async def api_upload_card(request):
     # Extract fields
     fields = {}
     image_data = None
-    frame_data = None
     
     while True:
         field = await reader.next()
@@ -2552,10 +2875,6 @@ async def api_upload_card(request):
             break
         if field.name == 'image':
             image_data = await field.read()
-        elif field.name == 'frame':
-            val = await field.read()
-            if val:
-                frame_data = val
         else:
             fields[field.name] = (await field.read()).decode('utf-8')
 
@@ -2574,18 +2893,6 @@ async def api_upload_card(request):
         await push_log(f"🦖 Dashboard: Uploaded new avatar to {img_path}")
     except Exception as e:
         return web.json_response({"error": f"Failed to save image: {e}"}, status=500)
-
-    # Save Frame to assets/dinos/frames/id.png
-    if frame_data:
-        frames_dir = os.path.join(assets_dir, "frames")
-        os.makedirs(frames_dir, exist_ok=True)
-        frame_path = os.path.join(frames_dir, f"{dino_id}.png")
-        try:
-            with open(frame_path, 'wb') as f:
-                f.write(frame_data)
-            await push_log(f"🦖 Dashboard: Uploaded custom frame to {frame_path}")
-        except Exception as e:
-            return web.json_response({"error": f"Failed to save frame: {e}"}, status=500)
 
     # Load JSON, construct template, and save
     new_template = {
