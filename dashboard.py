@@ -619,6 +619,7 @@ async def settings_page(request):
     stop_msg_safe = html_mod.escape(stop_msg or "", quote=True)
     admin_roles_json = json.dumps(admin_roles or [])
     beta_roles_json = json.dumps(beta_roles or [])
+    cur_session_type = g.get("session_type", lambda: "hunt")()
 
     days_html = ""
     for d in session_days:
@@ -644,6 +645,16 @@ async def settings_page(request):
                 <div class="setting-row">
                     <div><div class="setting-label">Check-in Grace (min)</div><div class="setting-desc">Minutes to check in after session starts</div></div>
                     <input class="setting-input" type="number" id="graceMinutes" value="{grace}" min="5" max="120">
+                </div>
+                <div class="setting-row">
+                    <div><div class="setting-label">🦴 Session Type</div><div class="setting-desc">Activity type changes the embed look &amp; feel</div></div>
+                    <select class="setting-input" id="sessionType" style="text-align:left">
+                        <option value="hunt"      {"selected" if cur_session_type == "hunt" else ""}>🦴 Group Hunt</option>
+                        <option value="nesting"   {"selected" if cur_session_type == "nesting" else ""}>🥚 Nesting Night</option>
+                        <option value="growth"    {"selected" if cur_session_type == "growth" else ""}>🌱 Growth Session</option>
+                        <option value="pvp"       {"selected" if cur_session_type == "pvp" else ""}>⚔️ PvP Night</option>
+                        <option value="migration" {"selected" if cur_session_type == "migration" else ""}>🏃 Migration Run</option>
+                    </select>
                 </div>
                 <div style="margin-top:16px;text-align:right">
                     <button class="btn btn-primary" onclick="saveSettings()">Save Session Settings</button>
@@ -842,7 +853,8 @@ async def settings_page(request):
         _post('/api/settings', {{
             max_attending: parseInt(document.getElementById('maxAttending').value),
             checkin_grace: parseInt(document.getElementById('graceMinutes').value),
-            noshow_threshold: parseInt(document.getElementById('noshowThreshold').value)
+            noshow_threshold: parseInt(document.getElementById('noshowThreshold').value),
+            session_type: document.getElementById('sessionType').value
         }}, 'Session settings saved!');
     }}
     function saveChannels() {{

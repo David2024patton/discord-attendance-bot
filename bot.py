@@ -46,6 +46,15 @@ DEFAULT_MAX_ATTENDING = 10
 DEFAULT_NOSHOW_THRESHOLD = 3  # auto-standby after this many no-shows
 DEFAULT_CHECKIN_GRACE = 30  # minutes after session start before auto-relieve
 
+# Session type definitions — emoji, color, label
+SESSION_TYPES = {
+    'hunt':      {'emoji': '🦴', 'color': 0xe74c3c, 'label': 'Group Hunt'},
+    'nesting':   {'emoji': '🥚', 'color': 0xf1c40f, 'label': 'Nesting Night'},
+    'growth':    {'emoji': '🌱', 'color': 0x2ecc71, 'label': 'Growth Session'},
+    'pvp':       {'emoji': '⚔️', 'color': 0xe91e63, 'label': 'PvP Night'},
+    'migration': {'emoji': '🏃', 'color': 0x3498db, 'label': 'Migration Run'},
+}
+
 ALLOWED_GUILDS = [1370907857830746194, 1370907957830746194, 1475253514111291594]
 SCHEDULE_CHANNEL_ID = 1370911001247223859
 DEFAULT_ARCHIVE_CHANNEL_ID = 1448185222842683456  # attendance-tracker channel
@@ -118,6 +127,7 @@ def load_state():
     global checkin_active, checked_in_ids, checkin_message_id
     global admin_role_names, beta_role_names, archive_channel_id, session_ended
     global status_channel_id, status_start_msg, status_stop_msg
+    global session_type, nest_parent_ids, nest_baby_ids
 
     try:
         if os.path.exists(STATE_FILE):
@@ -151,6 +161,9 @@ def load_state():
                 status_channel_id = data.get('status_channel_id', None)
                 status_start_msg = data.get('status_start_msg', '🟢 **{name}** is now LIVE! Join us!')
                 status_stop_msg = data.get('status_stop_msg', '🔴 **{name}** has ended. See you next time!')
+                session_type = data.get('session_type', 'hunt')
+                nest_parent_ids = data.get('nest_parent_ids', [])
+                nest_baby_ids = data.get('nest_baby_ids', [])
                 print(f"✅ Loaded state from {STATE_FILE}")
                 return True
     except Exception as e:
@@ -185,6 +198,9 @@ def load_state():
     status_channel_id = None
     status_start_msg = '🟢 **{name}** is now LIVE! Join us!'
     status_stop_msg = '🔴 **{name}** has ended. See you next time!'
+    session_type = 'hunt'
+    nest_parent_ids = []
+    nest_baby_ids = []
     return False
 
 def save_state():
@@ -213,6 +229,9 @@ def save_state():
         'status_channel_id': status_channel_id,
         'status_start_msg': status_start_msg,
         'status_stop_msg': status_stop_msg,
+        'session_type': session_type,
+        'nest_parent_ids': nest_parent_ids,
+        'nest_baby_ids': nest_baby_ids,
     }
     try:
         with open(STATE_FILE, 'w') as f:
@@ -589,7 +608,12 @@ def sync_ids_from_users():
 # Build embed (with countdown + streaks)
 # ----------------------------
 def build_embed():
-    title = session_name or "Session Sign-Up"
+    stype = SESSION_TYPES.get(session_type, SESSION_TYPES['hunt'])
+    title = f"{stype['emoji']} {session_name or 'Session Sign-Up'}"
+
+    # Add session type label
+    if session_type != 'hunt':
+        title += f" — {stype['label']}"
 
     # Add countdown if session time is set
     if session_dt_str:
@@ -606,45 +630,87 @@ def build_embed():
     elif session_has_started():
         color = 0xf39c12  # orange/amber - in progress
     else:
-        color = 0x2ecc71  # green - open
+        color = stype['color']  # use session type color
 
     embed = discord.Embed(title=title, color=color)
 
-    # Attending list with streak badges and check-in status
-    if attending:
-        attend_lines = []
-        for i, user in enumerate(attending):
-            checkin_mark = " ✅" if user.id in checked_in_ids else ""
-            attend_lines.append(f"`{i+1}.` {user.mention}{checkin_mark}{streak_badge(user.id)}")
-        attend_text = "\n".join(attend_lines)
-    else:
-        attend_text = "*No one yet — be the first!*"
+    # ── NESTING MODE ── shows Parent/Babies/Protectors
+    if session_type == 'nesting':
+        # Parents
+        parents = [u for u in attending if u.id in nest_parent_ids]
+        babies = [u for u in attending if u.id in nest_baby_ids]
+        protectors = [u for u in attending if u.id not in nest_parent_ids and u.id not in nest_baby_ids]
 
-    # Standby list
-    if standby:
-        standby_text = "\n".join(
-            f"`{i+1}.` {user.mention}{streak_badge(user.id)}"
-            for i, user in enumerate(standby)
+        if parents:
+            parent_text = "\n".join(f"`{i+1}.` {u.mention} 🦕" for i, u in enumerate(parents))
+        else:
+            parent_text = "*No parent designated — use `!parent @user`*"
+
+        if babies:
+            baby_lines = []
+            for i, u in enumerate(babies):
+                checkin_mark = " ✅" if u.id in checked_in_ids else ""
+                baby_lines.append(f"`{i+1}.` {u.mention} 🐣{checkin_mark}{streak_badge(u.id)}")
+            baby_text = "\n".join(baby_lines)
+        else:
+            baby_text = "*No babies yet — click Join as Baby!*"
+
+        if protectors:
+            prot_text = "\n".join(f"`{i+1}.` {u.mention} 🛡️{streak_badge(u.id)}" for i, u in enumerate(protectors))
+        else:
+            prot_text = "*None*"
+
+        embed.add_field(
+            name=f"\u2800\n🦕 Parent(s) ({len(parents)})",
+            value=parent_text + "\n\u2800",
+            inline=False
+        )
+        embed.add_field(
+            name=f"🐣 Babies ({len(babies)})",
+            value=baby_text + "\n\u2800",
+            inline=False
+        )
+        embed.add_field(
+            name=f"🛡️ Protectors ({len(protectors)})",
+            value=prot_text + "\n\u2800",
+            inline=False
         )
     else:
-        standby_text = "*Empty*"
+        # ── REGULAR MODE ── (Hunt, Growth, PvP, Migration)
+        if attending:
+            attend_lines = []
+            for i, user in enumerate(attending):
+                checkin_mark = " ✅" if user.id in checked_in_ids else ""
+                attend_lines.append(f"`{i+1}.` {user.mention}{checkin_mark}{streak_badge(user.id)}")
+            attend_text = "\n".join(attend_lines)
+        else:
+            attend_text = "*No one yet — be the first!*"
 
-    # Not attending
+        if standby:
+            standby_text = "\n".join(
+                f"`{i+1}.` {user.mention}{streak_badge(user.id)}"
+                for i, user in enumerate(standby)
+            )
+        else:
+            standby_text = "*Empty*"
+
+        embed.add_field(
+            name=f"\u2800\n✅ Attending ({len(attending)}/{MAX_ATTENDING})",
+            value=attend_text + "\n\u2800",
+            inline=False
+        )
+        embed.add_field(
+            name=f"⏳ Standby ({len(standby)})",
+            value=standby_text + "\n\u2800",
+            inline=False
+        )
+
+    # Not attending (both modes)
     if not_attending:
         not_attend_text = "\n".join(f"{user.mention}" for user in not_attending)
     else:
         not_attend_text = "*None*"
 
-    embed.add_field(
-        name=f"\u2800\n✅ Attending ({len(attending)}/{MAX_ATTENDING})",
-        value=attend_text + "\n\u2800",
-        inline=False
-    )
-    embed.add_field(
-        name=f"⏳ Standby ({len(standby)})",
-        value=standby_text + "\n\u2800",
-        inline=False
-    )
     embed.add_field(
         name=f"😞 Not Attending ({len(not_attending)})",
         value=not_attend_text,
@@ -662,7 +728,10 @@ def build_embed():
         if auto_standby_users:
             embed.set_footer(text="⚠️ Some users have high no-show counts")
         else:
-            embed.set_footer(text="Click a button below to sign up!")
+            footer = "Click a button below to sign up!"
+            if session_type == 'nesting':
+                footer = "🥚 Nesting mode — parents protect the nest, babies grow!"
+            embed.set_footer(text=footer)
 
     return embed
 
@@ -1175,12 +1244,17 @@ class ScheduleView(discord.ui.View):
 # ----------------------------
 # Create / Reset Session
 # ----------------------------
-async def create_schedule(channel, session_name_arg: str, session_dt: datetime = None):
+async def create_schedule(channel, session_name_arg: str, session_dt: datetime = None, stype: str = 'hunt'):
     global attending, standby, not_attending, pending_offer, event_message, schedule_view
     global session_name, session_dt_str, event_message_id, event_channel_id
     global attending_ids, standby_ids, not_attending_ids, pending_offer_id
     global reminder_sent, checkin_active, checked_in_ids, checkin_message_id
-    global countdown_task, session_ended
+    global countdown_task, session_ended, session_type, nest_parent_ids, nest_baby_ids
+
+    # Set session type
+    session_type = stype if stype in SESSION_TYPES else 'hunt'
+    nest_parent_ids = []
+    nest_baby_ids = []
 
     # Archive the previous session if there was one
     if session_name and (attending_ids or standby_ids or not_attending_ids):
@@ -1363,38 +1437,41 @@ async def _run_countdown():
 # ----------------------------
 # Commands
 # ----------------------------
-@bot.command(help="Create a Beta Led session. Usage: !schedule beta led <hour> (e.g. !schedule beta led 20 for 8PM)")
+@bot.command(help="Create a Beta Led session. Usage: !schedule [type] [hour] (e.g. !schedule nesting 20)")
 async def schedule(ctx, *args):
     """Create a Beta Led Session. Role-gated to Beta and Lead Beta roles."""
     if not has_beta_role(ctx.author):
         await ctx.send("❌ Only users with the **Beta** or **Lead Beta** role can schedule sessions.", delete_after=10)
         return
 
-    # Parse: !schedule beta led 20  or  !schedule 20  or  !schedule
+    # Parse args: look for hour (int) and session type (string matching SESSION_TYPES)
     hour = None
+    stype = 'hunt'
     for arg in args:
         try:
             hour = int(arg)
-            break
         except ValueError:
-            continue  # skip 'beta', 'led' etc.
+            lower = arg.lower()
+            if lower in SESSION_TYPES:
+                stype = lower
+            # skip unrecognized words like 'beta', 'led'
 
     if hour is None:
         hour = 20  # default to 8 PM
 
     if hour < 0 or hour > 23:
-        await ctx.send("❌ Hour must be 0–23 (24h format). Example: `!schedule beta led 20` for 8 PM.", delete_after=10)
+        await ctx.send("❌ Hour must be 0–23 (24h format). Example: `!schedule nesting 20` for 8 PM.", delete_after=10)
         return
 
     # Build session datetime for today at the specified hour
     now = datetime.now(EST)
     session_dt = now.replace(hour=hour, minute=0, second=0, microsecond=0)
 
-    # If the time has already passed today, still create it (they might be late creating)
+    sinfo = SESSION_TYPES[stype]
     h12 = hour % 12 or 12
     ampm = "PM" if hour >= 12 else "AM"
-    await create_schedule(ctx.channel, "Beta Led Session", session_dt=session_dt)
-    await ctx.send(f"✅ **Beta Led Session** scheduled for **{h12}{ampm} EST** today!", delete_after=10)
+    await create_schedule(ctx.channel, f"Beta Led {sinfo['label']}", session_dt=session_dt, stype=stype)
+    await ctx.send(f"✅ {sinfo['emoji']} **Beta Led {sinfo['label']}** scheduled for **{h12}{ampm} EST** today!", delete_after=10)
 
 @bot.command(help="Create a quick test session. Usage: !testsession [minutes] (default 1, admin only)")
 async def testsession(ctx, minutes: int = 1):
@@ -1591,6 +1668,8 @@ async def settings(ctx):
     embed.add_field(name="Beta Roles", value=beta_list, inline=True)
     embed.add_field(name="Archive Channel", value=f"<#{archive_channel_id}>", inline=True)
     embed.add_field(name="Session Status", value=status, inline=True)
+    sinfo = SESSION_TYPES.get(session_type, SESSION_TYPES['hunt'])
+    embed.add_field(name="Session Type", value=f"{sinfo['emoji']} {sinfo['label']}", inline=True)
     embed.add_field(name="Owner Admin", value=f"<@{ADMIN_ID}>", inline=True)
     await ctx.send(embed=embed)
 
@@ -1643,6 +1722,135 @@ async def endsession(ctx):
         return
     await ctx.send("🔴 Ending session...")
     await end_session()
+
+# ----------------------------
+# Session Type & Nesting Commands
+# ----------------------------
+@bot.command(help="Set session type. Usage: !settype hunt|nesting|growth|pvp|migration")
+async def settype(ctx, type_name: str = None):
+    """Change the current session's type."""
+    if not has_beta_role(ctx.author) and not await check_admin(ctx):
+        return
+    if not type_name or type_name.lower() not in SESSION_TYPES:
+        types_list = ', '.join(f"`{k}` {v['emoji']}" for k, v in SESSION_TYPES.items())
+        await ctx.send(f"❌ Invalid type. Available: {types_list}", delete_after=10)
+        return
+
+    global session_type, nest_parent_ids, nest_baby_ids
+    session_type = type_name.lower()
+    if session_type != 'nesting':
+        nest_parent_ids = []
+        nest_baby_ids = []
+    save_state()
+
+    sinfo = SESSION_TYPES[session_type]
+    await ctx.send(f"{sinfo['emoji']} Session type changed to **{sinfo['label']}**!", delete_after=10)
+
+    # Update the embed
+    if schedule_view and event_message:
+        await schedule_view.update_embed()
+
+@bot.command(help="Designate a user as nest parent. Usage: !parent @user")
+async def parent(ctx, member: discord.Member):
+    """Designate a user as a nest parent (nesting sessions only)."""
+    if not has_beta_role(ctx.author) and not await check_admin(ctx):
+        return
+    if session_type != 'nesting':
+        await ctx.send("❌ This command only works in **Nesting** sessions. Use `!settype nesting` first.", delete_after=10)
+        return
+    global nest_parent_ids
+    if member.id not in nest_parent_ids:
+        nest_parent_ids.append(member.id)
+        # Also ensure they're in the attending list
+        if member not in attending and member.id not in attending_ids:
+            attending.append(member)
+            attending_ids.append(member.id)
+        save_state()
+    await ctx.send(f"🦕 {member.mention} is now a **Nest Parent**!", delete_after=10)
+    if schedule_view and event_message:
+        await schedule_view.update_embed()
+
+@bot.command(help="Remove parent designation. Usage: !unparent @user")
+async def unparent(ctx, member: discord.Member):
+    """Remove nest parent designation."""
+    if not has_beta_role(ctx.author) and not await check_admin(ctx):
+        return
+    global nest_parent_ids
+    if member.id in nest_parent_ids:
+        nest_parent_ids.remove(member.id)
+        save_state()
+        await ctx.send(f"✅ {member.mention} is no longer a parent.", delete_after=10)
+        if schedule_view and event_message:
+            await schedule_view.update_embed()
+    else:
+        await ctx.send(f"❌ {member.mention} is not a parent.", delete_after=10)
+
+@bot.command(help="Designate a user as a baby. Usage: !baby @user")
+async def baby(ctx, member: discord.Member):
+    """Designate a user as a baby in a nesting session."""
+    if not has_beta_role(ctx.author) and not await check_admin(ctx):
+        return
+    if session_type != 'nesting':
+        await ctx.send("❌ This command only works in **Nesting** sessions. Use `!settype nesting` first.", delete_after=10)
+        return
+    global nest_baby_ids
+    if member.id not in nest_baby_ids:
+        nest_baby_ids.append(member.id)
+        # Also ensure they're in the attending list
+        if member not in attending and member.id not in attending_ids:
+            attending.append(member)
+            attending_ids.append(member.id)
+        # Remove from parent list if they were there
+        if member.id in nest_parent_ids:
+            nest_parent_ids.remove(member.id)
+        save_state()
+    await ctx.send(f"🐣 {member.mention} is now a **Baby**!", delete_after=10)
+    if schedule_view and event_message:
+        await schedule_view.update_embed()
+
+@bot.command(help="Remove baby designation. Usage: !unbaby @user")
+async def unbaby(ctx, member: discord.Member):
+    """Remove baby designation."""
+    if not has_beta_role(ctx.author) and not await check_admin(ctx):
+        return
+    global nest_baby_ids
+    if member.id in nest_baby_ids:
+        nest_baby_ids.remove(member.id)
+        save_state()
+        await ctx.send(f"✅ {member.mention} is no longer a baby.", delete_after=10)
+        if schedule_view and event_message:
+            await schedule_view.update_embed()
+    else:
+        await ctx.send(f"❌ {member.mention} is not a baby.", delete_after=10)
+
+@bot.command(help="Show current nesting status. Everyone can use this.")
+async def nest(ctx):
+    """Show current nesting status."""
+    if session_type != 'nesting':
+        await ctx.send("❌ No active nesting session. Current type: **" + SESSION_TYPES.get(session_type, {}).get('label', 'Unknown') + "**", delete_after=10)
+        return
+
+    parents = [u for u in attending if u.id in nest_parent_ids]
+    babies = [u for u in attending if u.id in nest_baby_ids]
+    protectors = [u for u in attending if u.id not in nest_parent_ids and u.id not in nest_baby_ids]
+
+    embed = discord.Embed(title="🥚 Nesting Status", color=0xf1c40f)
+    embed.add_field(
+        name=f"🦕 Parents ({len(parents)})",
+        value="\n".join(u.mention for u in parents) if parents else "*None*",
+        inline=True
+    )
+    embed.add_field(
+        name=f"🐣 Babies ({len(babies)})",
+        value="\n".join(u.mention for u in babies) if babies else "*None*",
+        inline=True
+    )
+    embed.add_field(
+        name=f"🛡️ Protectors ({len(protectors)})",
+        value="\n".join(u.mention for u in protectors) if protectors else "*None*",
+        inline=True
+    )
+    await ctx.send(embed=embed)
 
 # ----------------------------
 # Stats / Leaderboard
@@ -1773,6 +1981,7 @@ def _build_everyone_embed():
     embed.add_field(name="🔄  !swap @user", value="Request to swap your attending ↔ standby spot with another user.", inline=False)
     embed.add_field(name="📅  !days", value="Show the configured recurring session schedule.", inline=False)
     embed.add_field(name="⏩  !force", value="Force-post the next upcoming scheduled session.", inline=False)
+    embed.add_field(name="🥚  !nest", value="Show current nesting status (parents, babies, protectors).", inline=False)
     embed.set_footer(text="Page 1/2 · Session buttons: Attend · Standby · Not Attending · Relieve Spot")
     return embed
 
@@ -1792,6 +2001,9 @@ def _build_admin_embed():
     embed.add_field(name="⏱️  !setgrace <minutes>", value="Set the check-in grace period (5–120 min). Default: 30.", inline=False)
     embed.add_field(name="⚠️  !setnoshow <n>", value="Set the no-show threshold for auto-standby. Default: 3.", inline=False)
     embed.add_field(name="⚙️  !settings", value="Show all current bot settings.", inline=False)
+    embed.add_field(name="🦴  !settype <type>", value="Change session type: `hunt`, `nesting`, `growth`, `pvp`, `migration`.", inline=False)
+    embed.add_field(name="🦕  !parent @user", value="Designate a nest parent (nesting mode only).", inline=False)
+    embed.add_field(name="🐣  !baby @user", value="Designate a baby (nesting mode only).", inline=False)
     embed.set_footer(text="Page 2/2 · Admin only")
     return embed
 
@@ -2103,6 +2315,7 @@ def update_settings(data):
     global MAX_ATTENDING, CHECKIN_GRACE_MINUTES, NOSHOW_THRESHOLD
     global admin_role_names, beta_role_names, archive_channel_id, session_days
     global status_channel_id, status_start_msg, status_stop_msg
+    global session_type, nest_parent_ids, nest_baby_ids
     if "max_attending" in data:
         MAX_ATTENDING = int(data["max_attending"])
     if "checkin_grace" in data:
@@ -2124,6 +2337,11 @@ def update_settings(data):
         status_start_msg = data["status_start_msg"]
     if "status_stop_msg" in data:
         status_stop_msg = data["status_stop_msg"]
+    if "session_type" in data:
+        session_type = data["session_type"] if data["session_type"] in SESSION_TYPES else 'hunt'
+        if session_type != 'nesting':
+            nest_parent_ids.clear()
+            nest_baby_ids.clear()
     save_state()
 
 # ----------------------------
@@ -2179,6 +2397,9 @@ async def on_ready():
         "status_channel_id":   lambda: status_channel_id,
         "status_start_msg":    lambda: status_start_msg,
         "status_stop_msg":     lambda: status_stop_msg,
+        "session_type":        lambda: session_type,
+        "nest_parent_ids":     lambda: nest_parent_ids,
+        "nest_baby_ids":       lambda: nest_baby_ids,
         "save_history":       save_history,
         "update_settings":    update_settings,
         "create_schedule":    create_schedule,
