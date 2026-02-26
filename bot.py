@@ -272,7 +272,8 @@ def get_user_stats(user_id):
     if key not in attendance_history:
         attendance_history[key] = {
             "attended": 0, "no_shows": 0, "total_signups": 0,
-            "streak": 0, "best_streak": 0
+            "streak": 0, "best_streak": 0,
+            "nest_parent_count": 0, "nest_baby_count": 0, "nest_protector_count": 0
         }
     return attendance_history[key]
 
@@ -431,6 +432,19 @@ async def end_session():
         countdown_task.cancel()
         countdown_task = None
 
+    # Tally Nesting roles (only for attendees who checked in)
+    if session_type == 'nesting':
+        for uid in attending_ids:
+            if uid in checked_in_ids:
+                stats = get_user_stats(uid)
+                if uid in nest_parent_ids:
+                    stats["nest_parent_count"] += 1
+                elif uid in nest_baby_ids:
+                    stats["nest_baby_count"] += 1
+                elif uid in nest_protector_ids:
+                    stats["nest_protector_count"] += 1
+        save_history()
+
     # Archive to the attendance tracker channel
     await archive_session()
 
@@ -463,9 +477,10 @@ async def end_session():
     if status_channel_id:
         try:
             status_ch = await bot.fetch_channel(status_channel_id)
-            msg = status_stop_msg.replace('{name}', session_name or 'Session')
+            sname = SESSION_TYPES.get(session_type, SESSION_TYPES['hunt'])['label']
+            msg = status_stop_msg.replace('{name}', sname)
             stop_embed = discord.Embed(
-                title="Session Ended 🔴",
+                title=f"{sname} Ended 🔴",
                 description=msg,
                 color=0xe74c3c
             )
@@ -818,8 +833,9 @@ class CheckInView(discord.ui.View):
         button.disabled = True
         button.label = "Checked In ✅"
         button.style = discord.ButtonStyle.secondary
+        sname = SESSION_TYPES.get(session_type, SESSION_TYPES['hunt'])['label']
         await interaction.response.edit_message(
-            content="✅ **You're checked in!** See you in the session.",
+            content=f"✅ **You're checked in for the {sname}!** See you in the session.",
             view=self
         )
         # Refresh the session embed to show the checkmark
@@ -1042,7 +1058,121 @@ def _render_leaderboard_image(entries, clicker_id):
 
         y += row_height
 
-    # Export to bytes
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
+# ----------------------------
+# Nesting Leaderboard Image Renderer
+# ----------------------------
+def _render_nesting_leaderboard_image(entries, clicker_id):
+    """Render a Nesting leaderboard table as a PNG image. Returns a BytesIO object."""
+    # --- Configuration ---
+    BG_COLOR = (30, 33, 36)
+    HEADER_COLOR = (241, 196, 15)   # Yellow/Gold for nesting
+    ROW_EVEN = (44, 47, 51)
+    ROW_ODD = (54, 57, 63)
+    HIGHLIGHT_ROW = (133, 108, 12)  # Darker yellow for clicker
+    TEXT_COLOR = (255, 255, 255)
+    DIM_TEXT = (185, 187, 190)
+    GOLD = (255, 215, 0)
+    SILVER = (192, 192, 192)
+    BRONZE = (205, 127, 50)
+    MEDAL_COLORS = [GOLD, SILVER, BRONZE]
+
+    font_size = 16
+    header_font_size = 14
+    title_font_size = 22
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+        font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+        header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", header_font_size)
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", title_font_size)
+        emoji_font = ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf", 20) # Attempt to load emoji font
+    except OSError:
+        font = ImageFont.load_default()
+        font_bold = font
+        header_font = font
+        title_font = font
+        emoji_font = font
+
+    # --- Column layout ---
+    col_widths = [55, 200, 95, 95, 95]  # Rank, Name, Parents, Babies, Protectors
+    col_headers = ["Rank", "Name", "Parents", "Babies", "Protectors"]
+    row_height = 32
+    padding = 12
+    title_height = 45
+    header_height = 30
+    table_width = sum(col_widths) + padding * 2
+    table_height = title_height + header_height + row_height * len(entries) + padding
+
+    img = Image.new("RGB", (table_width, table_height), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    # --- Title bar with accent ---
+    draw.rectangle([(0, 0), (4, title_height)], fill=HEADER_COLOR)
+    draw.text((padding + 6, 10), "🥚 Nesting Leaderboard", fill=TEXT_COLOR, font=title_font)
+
+    # --- Column headers ---
+    y = title_height
+    draw.rectangle([(0, y), (table_width, y + header_height)], fill=HEADER_COLOR)
+    x = padding
+    for i, header in enumerate(col_headers):
+        # We can't render emojis easily with Pil without specific setups, so we use text labels
+        # but to keep it clean, we just write the text header in Black for contrast against yellow
+        draw.text((x + 4, y + 7), header, fill=(0,0,0), font=header_font)
+        x += col_widths[i]
+
+    # --- Data rows ---
+    y += header_height
+    medal_labels = ["#1", "#2", "#3"]
+    for idx, (uid_str, name, parents, babies, protectors) in enumerate(entries):
+        is_clicker = uid_str == clicker_id
+        if is_clicker:
+            row_color = HIGHLIGHT_ROW
+        elif idx % 2 == 0:
+            row_color = ROW_EVEN
+        else:
+            row_color = ROW_ODD
+
+        draw.rectangle([(0, y), (table_width, y + row_height)], fill=row_color)
+        if is_clicker:
+            draw.rectangle([(0, y), (4, y + row_height)], fill=GOLD)
+
+        x = padding
+        # Rank column
+        if idx < 3:
+            rank_text = medal_labels[idx]
+            rank_color = MEDAL_COLORS[idx]
+        else:
+            rank_text = f"#{idx + 1}"
+            rank_color = DIM_TEXT
+        draw.text((x + 4, y + 7), rank_text, fill=rank_color, font=font_bold)
+        x += col_widths[0]
+
+        # Name column
+        display_name = name[:18] + ".." if len(name) > 18 else name
+        if is_clicker:
+            display_name = ">>> " + display_name
+        name_font = font_bold if is_clicker else font
+        name_color = GOLD if is_clicker else TEXT_COLOR
+        draw.text((x + 4, y + 7), display_name, fill=name_color, font=name_font)
+        x += col_widths[1]
+
+        # Parents
+        draw.text((x + 4, y + 7), str(parents), fill=TEXT_COLOR, font=font)
+        x += col_widths[2]
+
+        # Babies
+        draw.text((x + 4, y + 7), str(babies), fill=TEXT_COLOR, font=font)
+        x += col_widths[3]
+
+        # Protectors
+        draw.text((x + 4, y + 7), str(protectors), fill=TEXT_COLOR, font=font)
+
+        y += row_height
+
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
@@ -1322,12 +1452,13 @@ class ScheduleView(discord.ui.View):
         embed = _build_everyone_embed()
         if user_is_admin:
             embed.set_footer(text="Page 1 · Only you can see this")
-            # Build a combined view with admin page button
             admin_embed = _build_admin_embed()
             admin_embed.set_footer(text="Page 2 · Only you can see this")
-            # Send both pages in one ephemeral response
+            test_embed = _build_test_embed()
+            test_embed.set_footer(text="Page 3 · Only you can see this")
+            # Send all 3 pages in one ephemeral response for admins
             await interaction.response.send_message(
-                embeds=[embed, admin_embed],
+                embeds=[embed, admin_embed, test_embed],
                 ephemeral=True
             )
         else:
@@ -1353,30 +1484,55 @@ class ScheduleView(discord.ui.View):
             await interaction.response.send_message("📊 No attendance data yet.", ephemeral=True)
             return
 
-        # Build leaderboard entries
-        entries = []
         guild = interaction.guild
         clicker_id = str(interaction.user.id)
-        for uid_str, data in attendance_history.items():
-            total = data.get("total_signups", 0)
-            if total == 0:
-                continue
-            attended = data.get("attended", 0)
-            no_shows = data.get("no_shows", 0)
-            streak = data.get("streak", 0)
-            rate = (attended / total) * 100
-            try:
-                member = guild.get_member(int(uid_str))
-                name = member.display_name if member else f"User {uid_str}"
-            except:
-                name = f"User {uid_str}"
-            entries.append((uid_str, name, attended, no_shows, rate, streak))
+        entries = []
 
-        entries.sort(key=lambda x: x[4], reverse=True)
-        entries = entries[:15]  # top 15
+        if session_type == 'nesting':
+            for uid_str, data in attendance_history.items():
+                parents = data.get("nest_parent_count", 0)
+                babies = data.get("nest_baby_count", 0)
+                protectors = data.get("nest_protector_count", 0)
+                total_nest = parents + babies + protectors
+                if total_nest == 0:
+                    continue
+                try:
+                    member = guild.get_member(int(uid_str))
+                    name = member.display_name if member else f"User {uid_str}"
+                except:
+                    name = f"User {uid_str}"
+                entries.append((uid_str, name, parents, babies, protectors))
 
-        # Render the image
-        img_bytes = _render_leaderboard_image(entries, clicker_id)
+            # Sort by total nested roles played, then by parents as tie-breaker
+            entries.sort(key=lambda x: ((x[2]+x[3]+x[4]), x[2]), reverse=True)
+            entries = entries[:15]
+            if not entries:
+                await interaction.response.send_message("🥚 No nesting data yet.", ephemeral=True)
+                return
+            img_bytes = _render_nesting_leaderboard_image(entries, clicker_id)
+        else:
+            for uid_str, data in attendance_history.items():
+                total = data.get("total_signups", 0)
+                if total == 0:
+                    continue
+                attended = data.get("attended", 0)
+                no_shows = data.get("no_shows", 0)
+                streak = data.get("streak", 0)
+                rate = (attended / total) * 100
+                try:
+                    member = guild.get_member(int(uid_str))
+                    name = member.display_name if member else f"User {uid_str}"
+                except:
+                    name = f"User {uid_str}"
+                entries.append((uid_str, name, attended, no_shows, rate, streak))
+
+            entries.sort(key=lambda x: x[4], reverse=True)
+            entries = entries[:15]  # top 15
+            if not entries:
+                await interaction.response.send_message("📊 No attendance data yet.", ephemeral=True)
+                return
+            img_bytes = _render_leaderboard_image(entries, clicker_id)
+
         file = discord.File(fp=img_bytes, filename="leaderboard.png")
         _leaderboard_cooldown = now
         await interaction.response.send_message(file=file)
@@ -1541,9 +1697,10 @@ async def _run_countdown():
                             try:
                                 archive_ch = await bot.fetch_channel(archive_channel_id)
                                 if archive_ch:
+                                    sname = SESSION_TYPES.get(session_type, SESSION_TYPES['hunt'])['label']
                                     online_embed = discord.Embed(
-                                        title="Session Online 🟢",
-                                        description="Were live for OOTAH TIME!",
+                                        title=f"{sname} Online 🟢",
+                                        description="We're live for OOTAH TIME!",
                                         color=0x2ecc71
                                     )
                                     await archive_ch.send(embed=online_embed)
@@ -2010,14 +2167,47 @@ async def nest(ctx):
 # ----------------------------
 # Stats / Leaderboard
 # ----------------------------
-@bot.command(help="Show the attendance leaderboard.")
-async def stats(ctx):
+@bot.command(help="Show the attendance leaderboard. Usage: !stats or !stats nesting")
+async def stats(ctx, stype: str = None):
     """Show the attendance leaderboard"""
     if not attendance_history:
-        await ctx.send("📊 No attendance data yet.")
+        await ctx.send("📊 No data yet.")
         return
 
-    # Sort by attendance rate
+    # Check for nesting stats request
+    if stype and stype.lower() == 'nesting':
+        entries = []
+        guild = ctx.guild
+        for uid_str, data in attendance_history.items():
+            parents = data.get("nest_parent_count", 0)
+            babies = data.get("nest_baby_count", 0)
+            protectors = data.get("nest_protector_count", 0)
+            total = parents + babies + protectors
+            if total == 0:
+                continue
+            try:
+                member = guild.get_member(int(uid_str))
+                name = member.display_name if member else f"User {uid_str}"
+            except:
+                name = f"User {uid_str}"
+            entries.append((name, parents, babies, protectors, total))
+
+        entries.sort(key=lambda x: x[4], reverse=True)
+        medals = ["🥇", "🥈", "🥉"]
+        lines = []
+        for i, (name, parents, babies, protectors, total) in enumerate(entries[:15]):
+            medal = medals[i] if i < 3 else f"{i+1}."
+            lines.append(f"{medal} **{name}** — 🦕 {parents} | 🐣 {babies} | 🛡️ {protectors}")
+
+        if not lines:
+            await ctx.send("🥚 No nesting data yet.")
+            return
+
+        embed = discord.Embed(title="🥚 Nesting Leaderboard", description="\n".join(lines), color=0xf1c40f)
+        await ctx.send(embed=embed)
+        return
+
+    # Sort by standard attendance rate
     entries = []
     guild = ctx.guild
     for uid_str, data in attendance_history.items():
@@ -2045,6 +2235,10 @@ async def stats(ctx):
         streak_str = f" 🔥{streak}" if streak >= 3 else ""
         noshow_str = f" ⚠️{no_shows}NS" if no_shows > 0 else ""
         lines.append(f"{medal} **{name}** — {attended}/{total} ({rate:.0f}%){streak_str}{noshow_str}")
+
+    if not lines:
+        await ctx.send("📊 No standard attendance data yet.")
+        return
 
     embed = discord.Embed(title="📊 Attendance Leaderboard", description="\n".join(lines), color=0x3498db)
     await ctx.send(embed=embed)
@@ -2132,12 +2326,13 @@ def _build_everyone_embed():
     )
     embed.add_field(name="✅  !schedule", value="Create a manual session sign-up in this channel.", inline=False)
     embed.add_field(name="📊  !stats", value="Show the attendance leaderboard (top 15 by rate).", inline=False)
+    embed.add_field(name="🥚  !stats nesting", value="Show the Nesting leaderboard (Parents, Babies, Protectors).", inline=False)
     embed.add_field(name="📈  !mystats", value="View your personal attendance stats (only you can see it).", inline=False)
     embed.add_field(name="🔄  !swap @user", value="Request to swap your attending ↔ standby spot with another user.", inline=False)
     embed.add_field(name="📅  !days", value="Show the configured recurring session schedule.", inline=False)
-    embed.add_field(name="⏩  !force", value="Force-post the next upcoming scheduled session.", inline=False)
+    embed.add_field(name="⏪  !force", value="Force-post the next upcoming scheduled session.", inline=False)
     embed.add_field(name="🥚  !nest", value="Show current nesting status (parents, babies, protectors).", inline=False)
-    embed.set_footer(text="Page 1/2 · Session buttons: Attend · Standby · Not Attending · Relieve Spot")
+    embed.set_footer(text="Page 1/3 · Session buttons: Attend · Standby · Not Attending · Relieve Spot")
     return embed
 
 def _build_admin_embed():
@@ -2147,7 +2342,6 @@ def _build_admin_embed():
         description="These commands can only be used by the bot admin.",
         color=0xe74c3c,
     )
-    embed.add_field(name="🧪  !testsession [minutes]", value="Create a quick test session (default 1 min). Example: `!testsession 5`", inline=False)
     embed.add_field(name="👥  !setmax <n>", value="Set the maximum number of attendees (1–50).", inline=False)
     embed.add_field(name="📆  !addday <Day> <hour>", value="Add a recurring session day. Example: `!addday Thursday 20` (8 PM).", inline=False)
     embed.add_field(name="🗑️  !removeday <Day>", value="Remove all sessions on a given day. Example: `!removeday Thursday`.", inline=False)
@@ -2159,6 +2353,19 @@ def _build_admin_embed():
     embed.add_field(name="🦴  !settype <type>", value="Change session type: `hunt`, `nesting`, `growth`, `pvp`, `migration`.", inline=False)
     embed.add_field(name="🦕  !parent @user", value="Designate a nest parent (nesting mode only).", inline=False)
     embed.add_field(name="🐣  !baby @user", value="Designate a baby (nesting mode only).", inline=False)
+    embed.set_footer(text="Page 2/3 · Admin only")
+    return embed
+
+def _build_test_embed():
+    """Build the Test commands help embed."""
+    embed = discord.Embed(
+        title="🧪  Test Commands",
+        description="These commands are used for testing features without triggering standard long-duration events.",
+        color=0xf1c40f,  # Yellow
+    )
+    embed.add_field(name="🧪  !testsession [minutes]", value="Create a quick test session (default 1 min). Example: `!testsession 3`", inline=False)
+    embed.add_field(name="🧪  !testsession <type> [minutes]", value="Create a quick test session for a specific type. Example: `!testsession nesting 5`", inline=False)
+    embed.set_footer(text="Page 3/3 · Testing only")
     embed.set_footer(text="Page 2/2 · Admin only")
     return embed
 
@@ -2168,16 +2375,17 @@ class HelpView(discord.ui.View):
         super().__init__(timeout=120)  # buttons expire after 2 min
         self.user_id = user_id
         self.show_admin = show_admin
-        # Only add the admin button if the user is admin
+        # Only add the admin/test buttons if the user is admin
         if not show_admin:
             self.remove_item(self.show_admin_page)
+            self.remove_item(self.show_test_page)
 
     @discord.ui.button(label="Everyone Commands", style=discord.ButtonStyle.success, emoji="📖")
     async def show_everyone_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("This help menu isn't for you. Type `!help` to get your own!", ephemeral=True)
             return
-        footer = "Page 1/2 · Session buttons: Attend · Standby · Not Attending · Relieve Spot" if self.show_admin else "Session buttons: Attend · Standby · Not Attending · Relieve Spot"
+        footer = "Page 1/3 · Session buttons: Attend · Standby · Not Attending · Relieve Spot" if self.show_admin else "Session buttons: Attend · Standby · Not Attending · Relieve Spot"
         embed = _build_everyone_embed()
         embed.set_footer(text=footer)
         await interaction.response.edit_message(embed=embed, view=self)
@@ -2188,6 +2396,13 @@ class HelpView(discord.ui.View):
             await interaction.response.send_message("This help menu isn't for you. Type `!help` to get your own!", ephemeral=True)
             return
         await interaction.response.edit_message(embed=_build_admin_embed(), view=self)
+
+    @discord.ui.button(label="Test Commands", style=discord.ButtonStyle.secondary, emoji="🧪")
+    async def show_test_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This help menu isn't for you. Type `!help` to get your own!", ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=_build_test_embed(), view=self)
 
 @bot.command(help="Show this help menu.")
 async def help(ctx):

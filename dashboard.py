@@ -793,6 +793,49 @@ async def settings_page(request):
                 </div>
             </div>
         </div>
+        <div style="margin-top:24px">
+            <h3 style="color:var(--text-bright);margin-bottom:12px">📖 Bot Commands Cheat Sheet</h3>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:16px;">
+                <div class="card" style="border-top: 3px solid var(--green)">
+                    <div class="card-header" style="color:var(--green)">📖 Everyone Commands</div>
+                    <ul class="user-list" style="font-size:13px">
+                        <li><strong>!schedule</strong><br><span style="color:var(--text-dim)">Create a Beta Led session. Use `!schedule [type] [hour]`</span></li>
+                        <li><strong>!join</strong><br><span style="color:var(--text-dim)">Register attendance (Must be a registered user to join).</span></li>
+                        <li><strong>!leave</strong><br><span style="color:var(--text-dim)">Remove your attendance spot.</span></li>
+                        <li><strong>!standby</strong><br><span style="color:var(--text-dim)">Move your spot to standby.</span></li>
+                        <li><strong>!relieve</strong><br><span style="color:var(--text-dim)">Swap your spot with the person at the top of the standby queue.</span></li>
+                        <li><strong>!swap @user</strong><br><span style="color:var(--text-dim)">Swap spots directly with @user.</span></li>
+                        <li><strong>!mystats</strong><br><span style="color:var(--text-dim)">View your personal stats.</span></li>
+                        <li><strong>!leaderboard [type]</strong><br><span style="color:var(--text-dim)">View server attendance leaderboard.</span></li>
+                        <li><strong>!help</strong><br><span style="color:var(--text-dim)">Get a link to the help menu.</span></li>
+                        <li><strong>!nest</strong><br><span style="color:var(--text-dim)">Show the current setup of the nesting session (if active).</span></li>
+                    </ul>
+                </div>
+                <div class="card" style="border-top: 3px solid var(--red)">
+                    <div class="card-header" style="color:var(--red)">🔒 Admin Commands</div>
+                    <ul class="user-list" style="font-size:13px">
+                        <li><strong>!setmax &lt;n&gt;</strong><br><span style="color:var(--text-dim)">Set the max number of session attendees.</span></li>
+                        <li><strong>!addday &lt;Day&gt; &lt;hour&gt;</strong><br><span style="color:var(--text-dim)">Add a recurring session.</span></li>
+                        <li><strong>!removeday &lt;Day&gt;</strong><br><span style="color:var(--text-dim)">Remove a recurring session.</span></li>
+                        <li><strong>!kick @user</strong><br><span style="color:var(--text-dim)">Remove user from signups/standby lists.</span></li>
+                        <li><strong>!resetstats @user</strong><br><span style="color:var(--text-dim)">Reset a user's attendance stats to zero.</span></li>
+                        <li><strong>!setgrace &lt;minutes&gt;</strong><br><span style="color:var(--text-dim)">Set check-in grace period (5-120 min).</span></li>
+                        <li><strong>!setnoshow &lt;n&gt;</strong><br><span style="color:var(--text-dim)">Set auto-standby no-show threshold.</span></li>
+                        <li><strong>!settings</strong><br><span style="color:var(--text-dim)">Show current bot configuration.</span></li>
+                        <li><strong>!settype &lt;type&gt;</strong><br><span style="color:var(--text-dim)">Change session type (hunt, nesting, growth, pvp, migration).</span></li>
+                        <li><strong>!parent @user</strong><br><span style="color:var(--text-dim)">Designate a nest parent.</span></li>
+                        <li><strong>!baby @user</strong><br><span style="color:var(--text-dim)">Designate a baby.</span></li>
+                    </ul>
+                </div>
+                <div class="card" style="border-top: 3px solid #f1c40f">
+                    <div class="card-header" style="color:#f1c40f">🧪 Test Commands</div>
+                    <ul class="user-list" style="font-size:13px">
+                        <li><strong>!testsession [minutes]</strong><br><span style="color:var(--text-dim)">Create a quick default test session (1 min).</span></li>
+                        <li><strong>!testsession &lt;type&gt; [minutes]</strong><br><span style="color:var(--text-dim)">Create a fast test of a specific type (e.g. `!testsession nesting 5`).</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
     </div>
     <script>
     let _allGuilds = [];
