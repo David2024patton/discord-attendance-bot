@@ -303,7 +303,8 @@ def _sidebar(active="home"):
             <a href="/calendar" class="{cls('calendar')}"><span class="icon">📅</span><span class="label">Calendar</span></a>
             <a href="/users" class="{cls('users')}"><span class="icon">👥</span><span class="label">Users</span></a>
             <a href="/logs" class="{cls('logs')}"><span class="icon">📋</span><span class="label">Logs</span></a>
-            <a href="/battle" class="{cls('battle')}"><span class="icon">🦖</span><span class="label">Battle</span></a>
+            <a href="/battle" class="{cls('battle')}"><span class="icon">🦖</span><span class="label">Battle Cards</span></a>
+            <a href="/dinolb" class="{cls('dinolb')}"><span class="icon">🏆</span><span class="label">Dino Stats</span></a>
             <a href="/settings" class="{cls('settings')}"><span class="icon">⚙️</span><span class="label">Settings</span></a>
         </nav>
         <div class="sidebar-footer">
@@ -595,6 +596,62 @@ async def logs_page(request):
     </script>"""
 
     return web.Response(text=_page("Logs", content, "logs"), content_type="text/html")
+
+
+@routes.get("/dinolb")
+async def dinolb_page(request):
+    if not _check_auth(request):
+        raise web.HTTPFound("/login")
+
+    lb = _state_getters.get("load_dino_lb", lambda: {})()
+    
+    rows = ""
+    rank = 1
+    # Sort by wins descending
+    for uid_str, stats in sorted(lb.items(), key=lambda x: x[1].get("wins", 0), reverse=True):
+        wins = stats.get("wins", 0)
+        losses = stats.get("losses", 0)
+        ties = stats.get("ties", 0)
+        streak = stats.get("streak", 0)
+        best = stats.get("best_streak", 0)
+        
+        name = uid_str
+        if bot_ref:
+            try:
+                u = await bot_ref.fetch_user(int(uid_str))
+                name = u.display_name
+            except:
+                pass
+
+        rows += f"""<tr>
+            <td><strong>#{rank}</strong></td>
+            <td><strong>{name}</strong><br><span style="font-size:11px;color:var(--text-dim)">{uid_str}</span></td>
+            <td style="color:var(--green);font-weight:bold;">{wins}</td>
+            <td style="color:var(--red);">{losses}</td>
+            <td style="color:var(--text-dim);">{ties}</td>
+            <td>🔥 {streak}</td>
+            <td style="color:var(--text-dim);">Best: {best}</td>
+        </tr>"""
+        rank += 1
+
+    if not rows:
+        rows = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">No betting data on record yet. Be the first!</td></tr>'
+
+    content = f"""
+    <div class="container">
+        <div class="card">
+            <div class="card-header">🦖 Dino Battle Leaderboard 🦕</div>
+            <table>
+                <thead><tr>
+                    <th>Rank</th><th>Bettor</th><th>Wins</th><th>Losses</th><th>Ties</th><th>Win Streak</th><th>Best Streak</th>
+                </tr></thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </div>
+    </div>
+    """
+
+    return web.Response(text=_page("Dino Stats", content, "dinolb"), content_type="text/html")
 
 # ── Battle Cards Page ────────────────────────────────────────────
 @routes.get("/battle")
