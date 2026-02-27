@@ -1218,14 +1218,47 @@ def _render_vs_image(dino_a, dino_b):
         font_stat_val = ImageFont.load_default()
         font_vs = ImageFont.load_default()
 
-    # Load card frame template
-    frame_path = os.path.join(os.path.dirname(__file__), "assets", "card_frame.png")
-    try:
-        card_frame = Image.open(frame_path).convert("RGBA")
-        card_frame = card_frame.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.LANCZOS)
-        has_frame = True
-    except Exception:
-        has_frame = False
+    # Build card frame programmatically (true alpha transparency)
+    def _build_card_frame(w, h):
+        """Draw an ornate card frame with true transparency using Pillow."""
+        frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        fd = ImageDraw.Draw(frame)
+        GOLD = (190, 155, 60, 255)
+        GOLD_DIM = (140, 110, 40, 200)
+        DARK = (18, 18, 22, 230)
+        BORDER_W = 6
+
+        # Outer border — gold rounded rectangle
+        fd.rounded_rectangle([(0, 0), (w-1, h-1)], radius=14, outline=GOLD, width=BORDER_W)
+        # Inner border — darker inset
+        fd.rounded_rectangle([(BORDER_W+2, BORDER_W+2), (w-BORDER_W-3, h-BORDER_W-3)],
+                             radius=10, outline=GOLD_DIM, width=2)
+
+        # Name banner bar (dark semi-transparent strip across middle)
+        banner_y = int(h * 0.50)
+        banner_h = 48
+        fd.rectangle([(BORDER_W+3, banner_y), (w-BORDER_W-3, banner_y + banner_h)], fill=DARK)
+        fd.line([(BORDER_W+3, banner_y), (w-BORDER_W-3, banner_y)], fill=GOLD, width=2)
+        fd.line([(BORDER_W+3, banner_y+banner_h), (w-BORDER_W-3, banner_y+banner_h)], fill=GOLD, width=2)
+
+        # Stats area background (lower portion, semi-transparent)
+        stats_top = banner_y + banner_h + 8
+        fd.rounded_rectangle(
+            [(BORDER_W+6, stats_top), (w-BORDER_W-6, h-BORDER_W-6)],
+            radius=8, fill=(10, 10, 15, 180)
+        )
+
+        # Corner diamonds (decorative)
+        for cx, cy in [(16, 16), (w-16, 16), (16, h-16), (w-16, h-16)]:
+            fd.polygon([(cx, cy-6), (cx+6, cy), (cx, cy+6), (cx-6, cy)], fill=GOLD)
+
+        # Top center gem
+        gem_x, gem_y = w // 2, 10
+        fd.polygon([(gem_x, gem_y-5), (gem_x+8, gem_y+3), (gem_x, gem_y+11), (gem_x-8, gem_y+3)], fill=GOLD)
+
+        return frame
+
+    card_frame = _build_card_frame(CARD_WIDTH, CARD_HEIGHT)
 
     def draw_card(x_offset, dino, side="left"):
         # Diet tint behind everything
@@ -1248,13 +1281,13 @@ def _render_vs_image(dino_a, dino_b):
             avatar = Image.open(avatar_path).convert("RGBA")
             avatar = avatar.resize(avatar_region, Image.Resampling.LANCZOS)
 
-            # Apply circular mask to avatar for clean look
+            # Apply rounded rectangle mask to avatar
             mask = Image.new("L", avatar_region, 0)
             mask_draw = ImageDraw.Draw(mask)
             mask_draw.rounded_rectangle([(0, 0), avatar_region], radius=12, fill=255)
             img.paste(avatar, (avatar_x, avatar_y), mask)
 
-            # If custom frame exists, overlay it
+            # If custom frame exists, overlay it on top of avatar
             if has_custom_frame:
                 try:
                     custom_frame = Image.open(custom_frame_path).convert("RGBA")
@@ -1270,9 +1303,8 @@ def _render_vs_image(dino_a, dino_b):
             draw.text((avatar_x + avatar_region[0]//2 - 30, avatar_y + avatar_region[1]//2 - 8),
                        "No Image", fill=TEXT_COLOR, font=font_sub)
 
-        # Overlay the card frame template on top
-        if has_frame:
-            img.paste(card_frame, (x_offset, PADDING), card_frame)
+        # Overlay the programmatic card frame on top (true alpha)
+        img.paste(card_frame, (x_offset, PADDING), card_frame)
 
         # Name — positioned in the name banner area of the frame
         import re as _re
@@ -3343,7 +3375,7 @@ async def dinobattle(ctx):
             if len(desc) > 3900:
                 desc = desc[:3900]
             battle_embed.description = desc
-            battle_embed.title = f"⚔️ Turn {i+1} of {len(result['turns'])}"
+            battle_embed.title = f"⚔️ Turn {i+1}"
             try:
                 await battle_msg.edit(embed=battle_embed)
             except:
