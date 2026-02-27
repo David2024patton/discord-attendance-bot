@@ -1213,8 +1213,11 @@ async def dino_profile_page(request):
             <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
                 <!-- Avatar -->
                 <div style="flex-shrink:0">
-                    <div style="width:180px;height:180px;border-radius:12px;background:var(--bg);border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center">
-                        <img src="{avatar_url}" alt="{dino['name']}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\\'color:var(--text-dim);font-size:12px;text-align:center\\'>No Avatar</div>'">
+                    <div style="position:relative;width:180px;height:180px;border-radius:12px;background:var(--bg);border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center">
+                        <img id="avatarImg" src="{avatar_url}" alt="{dino['name']}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.parentElement.querySelector('#noAvatarText').style.display='block'">
+                        <div id="noAvatarText" style="display:none;color:var(--text-dim);font-size:12px;text-align:center">No Avatar</div>
+                        <input type="file" id="avatarUpload" accept="image/*" style="display:none" onchange="uploadAvatar(this)">
+                        <button onclick="document.getElementById('avatarUpload').click()" style="position:absolute;bottom:6px;right:6px;width:32px;height:32px;border-radius:8px;border:none;background:rgba(88,101,242,0.85);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;backdrop-filter:blur(4px)" onmouseover="this.style.background='rgba(88,101,242,1)'" onmouseout="this.style.background='rgba(88,101,242,0.85)'" title="Upload Avatar">📷</button>
                     </div>
                 </div>
 
@@ -1277,6 +1280,41 @@ async def dino_profile_page(request):
             btn.textContent = 'Save Changes';
         }}
         btn.disabled = false;
+    }}
+
+    async function uploadAvatar(input) {{
+        if (!input.files || !input.files[0]) return;
+        const file = input.files[0];
+        if (file.size > 5 * 1024 * 1024) {{
+            alert('Image must be under 5MB');
+            return;
+        }}
+        const reader = new FileReader();
+        reader.onload = async function(e) {{
+            try {{
+                const r = await fetch('/api/upload-dino-avatar', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{
+                        id: '{dino_id}',
+                        image: e.target.result
+                    }})
+                }});
+                const data = await r.json();
+                if (data.ok) {{
+                    const img = document.getElementById('avatarImg');
+                    img.src = '/assets/dinos/{dino_id}.png?' + Date.now();
+                    img.style.display = 'block';
+                    const noText = document.getElementById('noAvatarText');
+                    if (noText) noText.style.display = 'none';
+                }} else {{
+                    alert(data.error || 'Upload failed');
+                }}
+            }} catch(err) {{
+                alert('Upload error: ' + err);
+            }}
+        }};
+        reader.readAsDataURL(file);
     }}
 
     // Load battle history from server
@@ -3344,6 +3382,51 @@ async def api_delete_card(request):
         return web.json_response({"ok": True})
         
     return web.json_response({"error": "Bot state error."}, status=500)
+
+@routes.post("/api/upload-dino-avatar")
+async def api_upload_dino_avatar(request):
+    """Upload an avatar image for a dino profile. Saves to assets/dinos/{id}.png."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    import base64
+    data = await request.json()
+    dino_id = data.get("id")
+    image_data = data.get("image")
+
+    if not dino_id or not image_data:
+        return web.json_response({"error": "Missing ID or image."}, status=400)
+
+    # Validate the dino exists
+    load_dinos = _state_getters.get("load_dinos")
+    if load_dinos:
+        all_dinos = load_dinos()
+        if not any(d['id'] == dino_id for d in all_dinos):
+            return web.json_response({"error": "Dino not found."}, status=404)
+
+    try:
+        # Strip data URI prefix if present (e.g., "data:image/png;base64,...")
+        if "," in image_data:
+            image_data = image_data.split(",", 1)[1]
+        raw = base64.b64decode(image_data)
+
+        # Ensure directory exists
+        dinos_dir = os.path.join(os.path.dirname(__file__), "assets", "dinos")
+        os.makedirs(dinos_dir, exist_ok=True)
+
+        # Save as PNG (convert via Pillow for consistency)
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(raw)).convert("RGBA")
+        # Resize to a reasonable size for cards
+        img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+        save_path = os.path.join(dinos_dir, f"{dino_id}.png")
+        img.save(save_path, format="PNG")
+
+        await push_log(f"🖼️ Dashboard: Uploaded avatar for {dino_id}")
+        return web.json_response({"ok": True})
+    except Exception as e:
+        return web.json_response({"error": f"Upload failed: {str(e)}"}, status=500)
 
 # ── Server Lifecycle ─────────────────────────────────────────────
 async def start_dashboard(bot):
