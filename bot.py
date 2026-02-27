@@ -2747,6 +2747,9 @@ class DinoBattleView(discord.ui.View):
 class DinoPostBattleView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        btn_again = discord.ui.Button(label="⚔️ Battle Again", style=discord.ButtonStyle.danger, custom_id="post_again")
+        btn_again.callback = self.again_callback
+        self.add_item(btn_again)
         btn_lb = discord.ui.Button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, custom_id="post_lb")
         btn_lb.callback = self.lb_callback
         self.add_item(btn_lb)
@@ -2756,6 +2759,11 @@ class DinoPostBattleView(discord.ui.View):
         btn_menu = discord.ui.Button(label="📚 Menu", style=discord.ButtonStyle.primary, custom_id="post_menu")
         btn_menu.callback = self.menu_callback
         self.add_item(btn_menu)
+
+    async def again_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message("⚔️ Starting a new battle! Use `!dinobattle` to join!", ephemeral=False)
+        ctx = await bot.get_context(interaction.message)
+        await dinobattle(ctx)
 
     async def lb_callback(self, interaction: discord.Interaction):
         lb = load_dino_lb()
@@ -3253,36 +3261,35 @@ async def dinobattle(ctx):
             a_hp_current = snap["a_hp"]
             b_hp_current = snap["b_hp"]
         elif i == len(result["turns"]) - 1:
-            # Last turn — use final HP from fighters
             a_hp_current = fa['hp']
             b_hp_current = fb['hp']
 
-        # Build HP bars header
+        # Build HP bars header (always visible at top)
         hp_header = (
             f"**{fa['name']}** {_hp_bar(max(0, a_hp_current), a_max)}"
             f"**{fb['name']}** {_hp_bar(max(0, b_hp_current), b_max)}"
         )
 
-        # Add this turn's combat lines (strip the 📊 summary line)
-        for line in turn_lines:
-            if not line.startswith("📊"):
-                combat_lines.append(line)
-        
-        # Only show last 8 combat lines — keeps HP bars always visible
-        recent = combat_lines[-8:]
-        full_log = "\n".join(recent)
-        
-        desc = hp_header + "\n" + full_log
-        if len(desc) > 3900:
-            desc = desc[-3900:]
+        # Filter out summary lines
+        turn_content = [line for line in turn_lines if not line.startswith("📊")]
 
-        battle_embed.description = desc
-        battle_embed.title = f"⚔️ Turn {i+1} of {len(result['turns'])}"
-        try:
-            await battle_msg.edit(embed=battle_embed)
-        except:
-            pass
-        await asyncio.sleep(3)
+        # Feed each line one by one within this turn
+        visible_lines = []
+        for line_idx, line in enumerate(turn_content):
+            visible_lines.append(line)
+            desc = hp_header + "\n" + "\n".join(visible_lines)
+            if len(desc) > 3900:
+                desc = desc[:3900]
+            battle_embed.description = desc
+            battle_embed.title = f"⚔️ Turn {i+1} of {len(result['turns'])}"
+            try:
+                await battle_msg.edit(embed=battle_embed)
+            except:
+                pass
+            await asyncio.sleep(1.5)
+
+        # Brief pause after turn finishes before clearing
+        await asyncio.sleep(1)
 
     # Determine winner & loser
     winner = None
@@ -3300,15 +3307,62 @@ async def dinobattle(ctx):
         hp_left = fa['hp'] if result["winner"] == "a" else fb['hp']
         hp_max = fa['max_hp'] if result["winner"] == "a" else fb['max_hp']
         
+        # Build two-column winner embed
+        import battle_engine as _be
+        winner_id = winner.get('id', '')
+        w_family = _be.SPECIES_FAMILIES.get(winner_id.lower(), "generic").replace("_", " ").title()
+        
         win_embed = discord.Embed(
-            title=f"🏆 The winner is... **{result['winner_name']}**!",
-            description=f"Surviving with **{hp_left}/{hp_max} HP**\n\n"
-                        f"💀 {result['loser_name']} has been defeated!",
+            title=f"🏆 {result['winner_name']} WINS!",
             color=0x2ecc71
         )
         
+        # Left column: Winner dino info
+        dino_stats = load_dino_stats()
+        w_stats = dino_stats.get(winner_id, {})
+        w_wins = w_stats.get('wins', 0)
+        w_losses = w_stats.get('losses', 0)
+        w_kills = w_stats.get('kills', 0)
+        w_total = w_stats.get('total_battles', 0)
+        w_wr = int((w_wins / max(1, w_total)) * 100)
+        
+        win_embed.add_field(
+            name=f"🦖 {result['winner_name']}",
+            value=(
+                f"**{w_family}** • {winner.get('type', '').capitalize()}\n"
+                f"❤️ **{hp_left}/{hp_max}** HP remaining\n"
+                f"📊 **{w_wins}W/{w_losses}L** ({w_wr}% WR)\n"
+                f"💀 **{w_kills}** career kills\n"
+                f"⚔️ **{w_total}** total battles"
+            ),
+            inline=True
+        )
+        
+        # Right column: Top bettors (max 5)
+        if winning_bets:
+            # Show up to 5 winners
+            bet_mentions = []
+            for uid in list(winning_bets)[:5]:
+                bet_mentions.append(f"<@{uid}>")
+            bet_text = "\n".join(bet_mentions)
+            if len(winning_bets) > 5:
+                bet_text += f"\n*+{len(winning_bets) - 5} more*"
+            win_embed.add_field(
+                name="🎉 Winners",
+                value=bet_text,
+                inline=True
+            )
+        else:
+            win_embed.add_field(name="📉 Bets", value="No winners!", inline=True)
+        
+        # Defeated dino info
+        win_embed.add_field(
+            name="",
+            value=f"💀 **{result['loser_name']}** has been defeated!",
+            inline=False
+        )
+        
         # Try to show winner's face
-        winner_id = winner.get('id', '')
         winner_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{winner_id}.png")
         if os.path.exists(winner_path):
             win_file = discord.File(winner_path, filename="winner.png")
@@ -3421,18 +3475,14 @@ async def dinobattle(ctx):
 
     win_embed.set_footer(text="Combat powered by authentic Path of Titans formulas • Oath Bot")
     
-    if winning_bets:
-        mentions = " ".join([f"<@{uid}>" for uid in winning_bets])
-        win_embed.add_field(name="🎉 Winning Bets!", value=mentions, inline=False)
-    else:
-        win_embed.add_field(name="📉 Bets", value="No one guessed correctly!", inline=False)
-
-    # Prop bet results display
+    # Prop bet results
     if prop_results:
         prop_text = "\n".join(prop_results)
         if all_prop_winners:
-            prop_mentions = " ".join([f"<@{uid}>" for uid in all_prop_winners])
+            prop_mentions = " ".join([f"<@{uid}>" for uid in list(all_prop_winners)[:5]])
             prop_text += f"\n\n🎲 **Prop Winners**: {prop_mentions}"
+            if len(all_prop_winners) > 5:
+                prop_text += f" *+{len(all_prop_winners) - 5} more*"
         win_embed.add_field(name="🎲 Prop Bet Results", value=prop_text, inline=False)
         
     post_view = DinoPostBattleView()
