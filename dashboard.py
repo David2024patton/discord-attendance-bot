@@ -358,7 +358,7 @@ def _sidebar(active="home"):
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <button class="toggle-btn" id="toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar">❖</button>
-            <div class="sidebar-brand">Oath <span>Scheduler</span></div>
+            <div class="sidebar-brand">Oath <span>Bot</span></div>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-nav-title">General</div>
@@ -383,7 +383,7 @@ def _page(title, content, active="home"):
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<title>{title} — Oath Scheduler</title>
+<title>{title} — Oath Bot</title>
 <style>{CSS}</style>
 </head><body>
 {_sidebar(active)}
@@ -397,7 +397,7 @@ def _page(title, content, active="home"):
 LOGIN_PAGE = f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Login — Oath Scheduler</title>
+<title>Login — Oath Bot</title>
 <style>{CSS}</style>
 </head><body>
 <div class="login-wrap">
@@ -656,11 +656,11 @@ async def dinolb_page(request):
     if not _check_auth(request):
         raise web.HTTPFound("/login")
 
+    # ── Battle Leaderboard ──
     lb = _state_getters.get("load_dino_lb", lambda: {})()
     
-    rows = ""
+    battle_rows = ""
     rank = 1
-    # Sort by wins descending
     for uid_str, stats in sorted(lb.items(), key=lambda x: x[1].get("wins", 0), reverse=True):
         wins = stats.get("wins", 0)
         losses = stats.get("losses", 0)
@@ -670,7 +670,7 @@ async def dinolb_page(request):
         
         name = await _resolve_name(uid_str)
 
-        rows += f"""<tr>
+        battle_rows += f"""<tr>
             <td><strong>#{rank}</strong></td>
             <td><strong>{name}</strong><br><span style="font-size:11px;color:var(--text-dim)">{uid_str}</span></td>
             <td style="color:var(--green);font-weight:bold;">{wins}</td>
@@ -681,24 +681,127 @@ async def dinolb_page(request):
         </tr>"""
         rank += 1
 
-    if not rows:
-        rows = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">No betting data on record yet. Be the first!</td></tr>'
+    if not battle_rows:
+        battle_rows = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">No betting data on record yet. Be the first!</td></tr>'
+
+    # ── Attendance Leaderboard ──
+    history = _state_getters.get("attendance_history", lambda: {})()
+    
+    attend_rows = ""
+    noshow_rows = ""
+    rank_a = 1
+    rank_n = 1
+    
+    # Build attendance data
+    attend_data = []
+    noshow_data = []
+    for uid_str, user_hist in history.items():
+        total = user_hist.get("total", 0)
+        attended = user_hist.get("attended", 0)
+        noshows = user_hist.get("noshows", 0)
+        checked_in = user_hist.get("checked_in", 0)
+        rate = round((attended / total * 100) if total > 0 else 0, 1)
+        attend_data.append((uid_str, total, attended, checked_in, noshows, rate))
+        if noshows > 0:
+            noshow_data.append((uid_str, noshows, total, rate))
+    
+    # Sort attendance by sessions attended descending
+    for uid_str, total, attended, checked_in, noshows, rate in sorted(attend_data, key=lambda x: x[2], reverse=True):
+        name = await _resolve_name(uid_str)
+        rate_color = "var(--green)" if rate >= 75 else ("var(--text-dim)" if rate >= 50 else "var(--red)")
+        attend_rows += f"""<tr>
+            <td><strong>#{rank_a}</strong></td>
+            <td><strong>{name}</strong><br><span style="font-size:11px;color:var(--text-dim)">{uid_str}</span></td>
+            <td style="font-weight:bold;">{total}</td>
+            <td style="color:var(--green);font-weight:bold;">{attended}</td>
+            <td>{checked_in}</td>
+            <td style="color:var(--red);">{noshows}</td>
+            <td style="color:{rate_color};font-weight:bold;">{rate}%</td>
+        </tr>"""
+        rank_a += 1
+
+    if not attend_rows:
+        attend_rows = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">No attendance data recorded yet.</td></tr>'
+
+    # Sort no-shows by count descending
+    for uid_str, noshows, total, rate in sorted(noshow_data, key=lambda x: x[1], reverse=True):
+        name = await _resolve_name(uid_str)
+        noshow_rate = round((noshows / total * 100) if total > 0 else 0, 1)
+        noshow_rows += f"""<tr>
+            <td><strong>#{rank_n}</strong></td>
+            <td><strong>{name}</strong><br><span style="font-size:11px;color:var(--text-dim)">{uid_str}</span></td>
+            <td style="color:var(--red);font-weight:bold;">{noshows}</td>
+            <td>{total}</td>
+            <td style="color:var(--red);">{noshow_rate}%</td>
+        </tr>"""
+        rank_n += 1
+
+    if not noshow_rows:
+        noshow_rows = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:24px">No no-shows recorded. Everyone is showing up!</td></tr>'
 
     content = f"""
+    <style>
+    .lb-tabs {{ display: flex; gap: 4px; margin-bottom: 20px; background: var(--bg3); padding: 4px; border-radius: 10px; }}
+    .lb-tab {{ flex: 1; padding: 10px 16px; text-align: center; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; color: var(--text-dim); transition: all 0.2s; border: none; background: none; }}
+    .lb-tab:hover {{ color: var(--text-bright); background: rgba(88,101,242,0.1); }}
+    .lb-tab.active {{ background: var(--accent); color: white; box-shadow: 0 2px 8px rgba(88,101,242,0.3); }}
+    .lb-panel {{ display: none; }}
+    .lb-panel.active {{ display: block; }}
+    </style>
     <div class="container">
-        <div class="card">
-            <div class="card-header">🦖 Dino Battle Leaderboard 🦕</div>
-            <table>
-                <thead><tr>
-                    <th>Rank</th><th>Bettor</th><th>Wins</th><th>Losses</th><th>Ties</th><th>Win Streak</th><th>Best Streak</th>
-                </tr></thead>
-                <tbody>{rows}</tbody>
-            </table>
+        <div class="lb-tabs">
+            <button class="lb-tab active" onclick="switchLbTab('battles')">🦖 Battles</button>
+            <button class="lb-tab" onclick="switchLbTab('attendance')">📊 Attendance</button>
+            <button class="lb-tab" onclick="switchLbTab('noshows')">❌ No-Shows</button>
+        </div>
+
+        <div class="lb-panel active" id="panel-battles">
+            <div class="card">
+                <div class="card-header">🦖 Dino Battle Leaderboard 🦕</div>
+                <table>
+                    <thead><tr>
+                        <th>Rank</th><th>Bettor</th><th>Wins</th><th>Losses</th><th>Ties</th><th>Win Streak</th><th>Best Streak</th>
+                    </tr></thead>
+                    <tbody>{battle_rows}</tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="lb-panel" id="panel-attendance">
+            <div class="card">
+                <div class="card-header">📊 Attendance Leaderboard</div>
+                <table>
+                    <thead><tr>
+                        <th>Rank</th><th>Member</th><th>Sessions</th><th>Attended</th><th>Checked In</th><th>No-Shows</th><th>Rate</th>
+                    </tr></thead>
+                    <tbody>{attend_rows}</tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="lb-panel" id="panel-noshows">
+            <div class="card">
+                <div class="card-header">❌ No-Show Wall of Shame</div>
+                <table>
+                    <thead><tr>
+                        <th>Rank</th><th>Member</th><th>No-Shows</th><th>Total Sessions</th><th>No-Show Rate</th>
+                    </tr></thead>
+                    <tbody>{noshow_rows}</tbody>
+                </table>
+            </div>
         </div>
     </div>
+    <script>
+    function switchLbTab(tab) {{
+        document.querySelectorAll('.lb-tab').forEach(function(t) {{ t.classList.remove('active'); }});
+        document.querySelectorAll('.lb-panel').forEach(function(p) {{ p.classList.remove('active'); }});
+        document.getElementById('panel-' + tab).classList.add('active');
+        event.target.classList.add('active');
+    }}
+    </script>
     """
 
-    return web.Response(text=_page("Dino Stats", content, "dinolb"), content_type="text/html")
+    return web.Response(text=_page("Leaderboard", content, "dinolb"), content_type="text/html")
 
 # ── Battle Cards Page ────────────────────────────────────────────
 @routes.get("/battle")
@@ -724,7 +827,7 @@ async def battle_page(request):
             lore_preview = 'No lore set'
         
         cards_html += f"""
-        <div class="card dino-card" style="border-top-color:{bg_col}" onclick="window.location='/dino/{safe_id}'">
+        <div class="card dino-card" data-diet="{d['type']}" style="border-top-color:{bg_col}" onclick="window.location='/dino/{safe_id}'">
             <div class="card-actions">
                 <button class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteCard('{safe_id}', '{safe_name}')">Delete</button>
             </div>
@@ -746,7 +849,16 @@ async def battle_page(request):
     if not cards_html:
         cards_html = '<div style="color:var(--text-dim);width:100%;text-align:center;padding:40px">No dinosaur profiles yet. Create one below.</div>'
 
+    carni_count = sum(1 for d in all_dinos if d['type'] == 'carnivore')
+    herbi_count = sum(1 for d in all_dinos if d['type'] == 'herbivore')
+
     content = f"""
+    <style>
+    .diet-tabs {{ display: flex; gap: 4px; margin-bottom: 20px; background: var(--bg3); padding: 4px; border-radius: 10px; }}
+    .diet-tab {{ flex: 1; padding: 10px 16px; text-align: center; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; color: var(--text-dim); transition: all 0.2s; border: none; background: none; }}
+    .diet-tab:hover {{ color: var(--text-bright); background: rgba(88,101,242,0.1); }}
+    .diet-tab.active {{ background: var(--accent); color: white; box-shadow: 0 2px 8px rgba(88,101,242,0.3); }}
+    </style>
     <div class="container">
         <!-- Global Frames Upload Module -->
         <div class="card" style="margin-bottom:24px;border-left:4px solid var(--accent)">
@@ -777,7 +889,13 @@ async def battle_page(request):
             <button class="btn btn-success" onclick="document.getElementById('uploadModal').classList.add('active')">+ Create Profile</button>
         </div>
         
-        <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));gap:16px">
+        <div class="diet-tabs" style="margin-bottom:20px">
+            <button class="diet-tab active" onclick="filterDinos('all', this)">All ({len(all_dinos)})</button>
+            <button class="diet-tab" onclick="filterDinos('carnivore', this)">🥩 Carnivores ({carni_count})</button>
+            <button class="diet-tab" onclick="filterDinos('herbivore', this)">🌿 Herbivores ({herbi_count})</button>
+        </div>
+
+        <div class="grid" id="dinoGrid" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));gap:16px">
             {cards_html}
         </div>
     </div>
@@ -965,6 +1083,18 @@ async def battle_page(request):
             }}
         }});
     }}
+
+    function filterDinos(diet, btn) {{
+        document.querySelectorAll('.diet-tab').forEach(function(t) {{ t.classList.remove('active'); }});
+        btn.classList.add('active');
+        document.querySelectorAll('#dinoGrid .dino-card').forEach(function(card) {{
+            if (diet === 'all' || card.dataset.diet === diet) {{
+                card.style.display = '';
+            }} else {{
+                card.style.display = 'none';
+            }}
+        }});
+    }}
     </script>
     """
     return web.Response(text=_page("Battle Cards", content, "battle"), content_type="text/html")
@@ -1061,9 +1191,18 @@ async def dino_profile_page(request):
         </div>
 
         <!-- Actions -->
-        <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">
+        <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px" onclick="battleAgain()">⚔️ Battle Again</button>
             <button class="btn btn-primary" id="saveProfileBtn" onclick="saveProfile()">Save Changes</button>
             <button class="btn btn-danger" onclick="if(confirm('Delete {dino['name']}?')){{fetch('/api/delete-card',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{id:'{dino_id}'}})}}).then(()=>window.location='/battle')}}">Delete Profile</button>
+        </div>
+
+        <!-- Battle Result Panel -->
+        <div id="battleResult" class="card" style="margin-top:20px;display:none;border-left:4px solid var(--accent)">
+            <div style="text-align:center;margin-bottom:16px">
+                <h3 id="battleTitle" style="margin:0;color:var(--text-bright);font-size:22px">⚔️ Battle Result</h3>
+            </div>
+            <div id="battleContent"></div>
         </div>
     </div>
 
@@ -1094,6 +1233,60 @@ async def dino_profile_page(request):
             btn.textContent = 'Save Changes';
         }}
         btn.disabled = false;
+    }}
+
+    async function battleAgain() {{
+        try {{
+            const r = await fetch('/api/dinos');
+            const allDinos = await r.json();
+            const me = allDinos.find(d => d.id === '{dino_id}');
+            const opponents = allDinos.filter(d => d.id !== '{dino_id}');
+            if (opponents.length === 0) {{ alert('No opponents available!'); return; }}
+            const opp = opponents[Math.floor(Math.random() * opponents.length)];
+
+            // Stat-based combat with randomness
+            const myPower = (me.atk || 50) * (me.hp || 500) * (me.spd || 500) / 1000000;
+            const oppPower = (opp.atk || 50) * (opp.hp || 500) * (opp.spd || 500) / 1000000;
+            const myRoll = myPower * (0.7 + Math.random() * 0.6);
+            const oppRoll = oppPower * (0.7 + Math.random() * 0.6);
+            const won = myRoll >= oppRoll;
+
+            const panel = document.getElementById('battleResult');
+            const content = document.getElementById('battleContent');
+            const title = document.getElementById('battleTitle');
+
+            title.innerHTML = won
+                ? '<span style="color:var(--green)">⚔️ VICTORY!</span>'
+                : '<span style="color:var(--red)">⚔️ DEFEAT</span>';
+
+            const oppCol = opp.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
+            const myCol = me.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
+
+            content.innerHTML = ''
+                + '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center">'
+                + '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (won ? 'var(--green)' : 'var(--border)') + '">'
+                + '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + me.name + '</div>'
+                + '<div style="font-size:12px;color:' + myCol + ';margin-bottom:8px">' + (me.type || '').toUpperCase() + '</div>'
+                + '<div style="font-size:13px">ATK <strong>' + (me.atk||50) + '</strong> &middot; HP <strong>' + (me.hp||500) + '</strong> &middot; SPD <strong>' + (me.spd||500) + '</strong></div>'
+                + '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">Roll: ' + myRoll.toFixed(1) + '</div>'
+                + '</div>'
+                + '<div style="font-size:28px;font-weight:800;color:var(--text-dim)">VS</div>'
+                + '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (!won ? 'var(--green)' : 'var(--border)') + '">'
+                + '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + opp.name + '</div>'
+                + '<div style="font-size:12px;color:' + oppCol + ';margin-bottom:8px">' + (opp.type || '').toUpperCase() + '</div>'
+                + '<div style="font-size:13px">ATK <strong>' + (opp.atk||50) + '</strong> &middot; HP <strong>' + (opp.hp||500) + '</strong> &middot; SPD <strong>' + (opp.spd||500) + '</strong></div>'
+                + '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">Roll: ' + oppRoll.toFixed(1) + '</div>'
+                + '</div>'
+                + '</div>'
+                + '<div style="text-align:center;margin-top:16px">'
+                + '<button class="btn" onclick="battleAgain()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px">⚔️ Battle Again</button>'
+                + '</div>';
+
+            panel.style.display = '';
+            panel.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }});
+        }} catch(err) {{
+            alert('Battle error: ' + err);
+        }}
     }}
     </script>
     """
@@ -1892,8 +2085,15 @@ async def calendar_page(request):
         <div class="modal">
             <h3>Edit Recurring Card</h3>
             <input type="hidden" id="editRecIndex" value="">
-            <label>Session Name</label>
-            <input type="text" id="editRecName" placeholder="e.g. Wednesday Raid">
+            <label>Session Type</label>
+            <select id="editRecType">
+                <option value="Hunt">Hunt</option>
+                <option value="Nesting">Nesting</option>
+                <option value="Growth">Growth</option>
+                <option value="PvP">PvP</option>
+                <option value="Migration">Migration</option>
+                <option value="Session">General Session</option>
+            </select>
             <label>Session Hour (24h)</label>
             <select id="editRecHour">{hour_options_full}</select>
             <label>Post Hours Before</label>
@@ -2359,7 +2559,7 @@ async def calendar_page(request):
         e.stopPropagation();
         const sd = sessionDays[index];
         document.getElementById('editRecIndex').value = index;
-        document.getElementById('editRecName').value = sd.name || ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][sd.weekday];
+        document.getElementById('editRecType').value = sd.type || 'Session';
         document.getElementById('editRecHour').value = String(sd.hour);
         document.getElementById('editRecPostBefore').value = String(sd.post_hours_before || 12);
         document.getElementById('editRecurringModal').classList.add('active');
@@ -2367,14 +2567,14 @@ async def calendar_page(request):
 
     function saveEditRecurring() {
         const idx = parseInt(document.getElementById('editRecIndex').value);
-        const name = document.getElementById('editRecName').value;
+        const evType = document.getElementById('editRecType').value;
         const hour = parseInt(document.getElementById('editRecHour').value);
         const post = parseInt(document.getElementById('editRecPostBefore').value);
 
         fetch('/api/edit-recurring-day', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ index: idx, name: name, hour: hour, post_hours_before: post })
+            body: JSON.stringify({ index: idx, name: evType, type: evType, hour: hour, post_hours_before: post })
         }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.ok) {
                 sessionDays = d.days;
@@ -2559,6 +2759,7 @@ async def api_edit_recurring_day(request):
             
         idx = int(idx_str)
         name = data.get("name", "Session").strip()
+        ev_type = data.get("type", name).strip()
         hour = int(data.get("hour", 20))
         post_hours_before = int(data.get("post_hours_before", 12))
         
@@ -2568,6 +2769,7 @@ async def api_edit_recurring_day(request):
             
         if name:
             session_days[idx]["name"] = name
+        session_days[idx]["type"] = ev_type
         session_days[idx]["hour"] = hour
         session_days[idx]["post_hours_before"] = post_hours_before
         
@@ -2953,6 +3155,15 @@ async def api_edit_current_session(request):
         return web.json_response({"error": "Bot hook missing"}, status=500)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
+
+@routes.get("/api/dinos")
+async def api_dinos(request):
+    """Return all dino profiles as JSON for client-side battle simulation."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    load_dinos = _state_getters.get("load_dinos")
+    dinos = load_dinos() if load_dinos else []
+    return web.json_response(dinos)
 
 @routes.post("/api/delete-card")
 async def api_delete_card(request):
