@@ -2471,6 +2471,7 @@ async def days(ctx):
 # ----------------------------
 DINOS_FILE = os.path.join(os.path.dirname(__file__), "dinos.json")
 DINO_LB_FILE = os.path.join(os.path.dirname(__file__), "dino_lb.json")
+DINO_STATS_FILE = os.path.join(os.path.dirname(__file__), "dino_battle_stats.json")
 
 DINO_TEMPLATES = [
     # Officials
@@ -2520,6 +2521,76 @@ def save_dino_lb(lb_data):
             json.dump(lb_data, f, indent=2)
     except Exception as e:
         print(f"❌ Error saving {DINO_LB_FILE}: {e}")
+
+def load_dino_stats():
+    if os.path.exists(DINO_STATS_FILE):
+        try:
+            with open(DINO_STATS_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"❌ Error loading {DINO_STATS_FILE}: {e}")
+    return {}
+
+def save_dino_stats(stats):
+    try:
+        with open(DINO_STATS_FILE, 'w') as f:
+            json.dump(stats, f, indent=2)
+    except Exception as e:
+        print(f"❌ Error saving {DINO_STATS_FILE}: {e}")
+
+def _record_dino_battle(result, dino_a, dino_b):
+    """Record per-dino battle stats from engine result."""
+    stats = load_dino_stats()
+    fa = result["fighter_a"]
+    fb = result["fighter_b"]
+    
+    for dino, fighter, side_label in [(dino_a, fa, "a"), (dino_b, fb, "b")]:
+        did = dino.get("id", dino.get("name", "unknown"))
+        if did not in stats:
+            stats[did] = {
+                "name": dino.get("name", did),
+                "type": dino.get("type", "unknown"),
+                "cw": dino.get("cw", 0),
+                "wins": 0, "losses": 0, "ties": 0,
+                "kills": 0, "deaths": 0, "flees": 0,
+                "total_battles": 0,
+                "battle_log": []
+            }
+        entry = stats[did]
+        entry["total_battles"] += 1
+        
+        # Win/loss
+        if result["winner"] == side_label:
+            entry["wins"] += 1
+        elif result["winner"] is None:
+            entry["ties"] += 1
+        else:
+            entry["losses"] += 1
+        
+        # Deaths (pack members that died)
+        dead = fighter.get("pack_size", 1) - fighter.get("alive_count", 1)
+        entry["deaths"] += max(0, dead)
+        
+        # Flees
+        entry["flees"] += fighter.get("fled_count", 0)
+        
+        # Kills (opponent's deaths)
+        opp = fb if side_label == "a" else fa
+        opp_dead = opp.get("pack_size", 1) - opp.get("alive_count", 1)
+        entry["kills"] += max(0, opp_dead)
+        
+        # Battle log (last 20)
+        opp_dino = dino_b if side_label == "a" else dino_a
+        log_entry = {
+            "vs": opp_dino.get("name", "Unknown"),
+            "result": "win" if result["winner"] == side_label else ("tie" if result["winner"] is None else "loss"),
+            "hp_left": fighter.get("hp", 0),
+            "hp_max": fighter.get("max_hp", 0),
+            "timestamp": datetime.now(EST).isoformat()
+        }
+        entry["battle_log"] = entry.get("battle_log", [])[-19:] + [log_entry]
+    
+    save_dino_stats(stats)
 
 class DinoBattleView(discord.ui.View):
     def __init__(self, dino_a, dino_b):
@@ -2634,6 +2705,14 @@ class DinoBattleView(discord.ui.View):
         embed = await _build_dino_lb_embed(interaction.client, lb)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    async def dino_lb_callback(self, interaction: discord.Interaction):
+        stats = load_dino_stats()
+        if not stats:
+            await interaction.response.send_message("No dino battles recorded yet!", ephemeral=True)
+            return
+        embed = _build_dino_stats_embed(stats)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     async def menu_callback(self, interaction: discord.Interaction):
         is_admin = False
         view = HelpView(interaction.user.id, show_admin=is_admin)
@@ -2648,6 +2727,9 @@ class DinoPostBattleView(discord.ui.View):
         btn_lb = discord.ui.Button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, custom_id="post_lb")
         btn_lb.callback = self.lb_callback
         self.add_item(btn_lb)
+        btn_dino_lb = discord.ui.Button(label="🦕 Dino Leaderboard", style=discord.ButtonStyle.success, custom_id="post_dino_lb")
+        btn_dino_lb.callback = self.dino_lb_callback
+        self.add_item(btn_dino_lb)
         btn_menu = discord.ui.Button(label="📚 Menu", style=discord.ButtonStyle.primary, custom_id="post_menu")
         btn_menu.callback = self.menu_callback
         self.add_item(btn_menu)
@@ -2805,6 +2887,44 @@ async def _build_dino_lb_embed(client, lb):
     )
     embed.set_footer(text=f"Week: {week} • ⭐ = Weekly Champion titles")
     return embed
+
+
+def _build_dino_stats_embed(stats):
+    """Build a dino leaderboard showing species battle records."""
+    # Sort by wins descending, then by win rate
+    sorted_dinos = sorted(
+        stats.items(),
+        key=lambda x: (x[1].get('wins', 0), x[1].get('wins', 0) / max(1, x[1].get('total_battles', 1))),
+        reverse=True
+    )
+    
+    desc_lines = []
+    medal = ['🥇', '🥈', '🥉']
+    for i, (did, ds) in enumerate(sorted_dinos[:15]):
+        name = ds.get('name', did)
+        dtype = ds.get('type', 'unknown')
+        w = ds.get('wins', 0)
+        l = ds.get('losses', 0)
+        t = ds.get('total_battles', 0)
+        k = ds.get('kills', 0)
+        d = ds.get('deaths', 0)
+        f = ds.get('flees', 0)
+        wr = int((w / max(1, t)) * 100)
+        icon = medal[i] if i < 3 else f'**#{i+1}**'
+        type_emoji = '🔴' if dtype == 'carnivore' else '🟢'
+        
+        line = f"{icon} {type_emoji} **{name}** — {wr}% WR\n"
+        line += f"  {w}W/{l}L ({t} battles) | 💀{k} kills | ☠️{d} deaths | 🏃{f} flees"
+        desc_lines.append(line)
+    
+    embed = discord.Embed(
+        title="🦕 Dino Battle Leaderboard 🦖",
+        description="\n".join(desc_lines) if desc_lines else "No dino battles recorded yet!",
+        color=0x2ecc71
+    )
+    embed.set_footer(text="Species ranked by total wins • 🔴 Carnivore 🟢 Herbivore")
+    return embed
+
 
 @bot.command(help="Start a dinosaur battle! Users have 60s to bet.")
 
@@ -3059,6 +3179,9 @@ async def dinobattle(ctx):
         lb[u_str]["prop_losses"] = lb[u_str].get("prop_losses", 0) + 1
                 
     save_dino_lb(lb)
+
+    # Record per-dino battle stats
+    _record_dino_battle(result, dino_a, dino_b)
 
     win_embed.set_footer(text="Combat powered by authentic Path of Titans formulas • Oath Bot")
     
