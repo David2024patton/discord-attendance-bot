@@ -828,21 +828,28 @@ async def battle_page(request):
             lore_preview = 'No lore set'
         
         cards_html += f"""
-        <div class="card dino-card" data-diet="{d['type']}" style="border-top-color:{bg_col}" onclick="window.location='/dino/{safe_id}'">
+        <div class="card dino-card" data-diet="{d['type']}" style="border-top-color:{bg_col};cursor:pointer" onclick="window.location='/dino/{safe_id}'">
             <div class="card-actions">
                 <button class="btn btn-danger btn-sm" style="padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteCard('{safe_id}', '{safe_name}')">Delete</button>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-                <div style="font-weight:700;font-size:16px;color:var(--text-bright)">{safe_name}</div>
-                <div class="badge" style="background:rgba({'240,71,71' if d['type']=='carnivore' else '67,181,129'},0.2);color:{bg_col};font-size:11px">{d['type'].upper()}</div>
+            <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
+                <div style="width:72px;height:72px;border-radius:50%;overflow:hidden;flex-shrink:0;border:2px solid {bg_col};background:var(--bg3)">
+                    <img src="/assets/dinos/{safe_id}.png" style="width:100%;height:100%;object-fit:cover" onerror="this.src='/assets/dinos/defaults/{safe_id}.png';this.onerror=function(){{this.style.display='none';this.parentElement.innerHTML='<div style=&quot;width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px&quot;>🦕</div>'}}">
+                </div>
+                <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <div style="font-weight:700;font-size:16px;color:var(--text-bright);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{safe_name}</div>
+                        <div class="badge" style="background:rgba({'240,71,71' if d['type']=='carnivore' else '67,181,129'},0.2);color:{bg_col};font-size:11px;flex-shrink:0">{d['type'].upper()}</div>
+                    </div>
+                    <div style="color:var(--text-dim);font-size:12px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{lore_preview}</div>
+                </div>
             </div>
-            <div style="color:var(--text-dim);font-size:12px;margin-bottom:12px;font-style:italic">{lore_preview}</div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:13px">
-                <div>CW <strong style="color:var(--text-bright)">{d.get('cw', 3000)}</strong></div>
-                <div>HP <strong style="color:var(--green)">{d.get('hp', 500)}</strong></div>
-                <div>ATK <strong style="color:var(--red)">{d.get('atk', 50)}</strong></div>
-                <div>DEF <strong style="color:var(--accent)">{d.get('armor', 1.0)}</strong></div>
-                <div>SPD <strong style="color:#f1c40f">{d.get('spd', 500)}</strong></div>
+            <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;font-size:12px;text-align:center">
+                <div style="background:var(--bg3);padding:4px;border-radius:4px">CW <strong style="color:var(--text-bright)">{d.get('cw', 3000)}</strong></div>
+                <div style="background:var(--bg3);padding:4px;border-radius:4px">HP <strong style="color:var(--green)">{d.get('hp', 500)}</strong></div>
+                <div style="background:var(--bg3);padding:4px;border-radius:4px">ATK <strong style="color:var(--red)">{d.get('atk', 50)}</strong></div>
+                <div style="background:var(--bg3);padding:4px;border-radius:4px">DEF <strong style="color:var(--accent)">{d.get('armor', 1.0)}</strong></div>
+                <div style="background:var(--bg3);padding:4px;border-radius:4px">SPD <strong style="color:#f1c40f">{d.get('spd', 500)}</strong></div>
             </div>
         </div>
         """

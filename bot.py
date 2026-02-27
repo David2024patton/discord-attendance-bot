@@ -1234,6 +1234,8 @@ def _render_vs_image(dino_a, dino_b):
         # Avatar
         try:
             avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino['id']}.png")
+            if not os.path.exists(avatar_path):
+                avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "defaults", f"{dino['id']}.png")
             avatar = Image.open(avatar_path).convert("RGBA")
             if frame_exists:
                 # Fill behind the frame area entirely
@@ -3599,8 +3601,10 @@ async def dino(ctx, *, name: str = None):
     if match.get('lore'):
         embed.add_field(name="📜 Lore", value=match['lore'][:200], inline=False)
 
-    # Try to set thumbnail
+    # Try to set thumbnail — custom upload first, then default
     avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino_id}.png")
+    if not os.path.exists(avatar_path):
+        avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "defaults", f"{dino_id}.png")
     if os.path.exists(avatar_path):
         file = discord.File(avatar_path, filename="dino.png")
         embed.set_thumbnail(url="attachment://dino.png")
