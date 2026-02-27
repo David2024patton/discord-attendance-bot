@@ -907,6 +907,52 @@ async def battle_page(request):
             </div>
         </div>
 
+        <!-- Card Anatomy Guide -->
+        <details class="card" style="margin-bottom:24px;border-left:4px solid #f1c40f;cursor:pointer">
+            <summary style="font-weight:700;font-size:16px;color:var(--text-bright);padding:4px 0">
+                📖 Battle Card Anatomy Guide
+                <span style="color:var(--text-dim);font-size:12px;font-weight:400;margin-left:8px">Click to expand</span>
+            </summary>
+            <div style="margin-top:16px;display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+                <div style="flex:0 0 280px">
+                    <img src="/assets/card_help_guide.png" alt="Card Anatomy Guide" style="width:100%;border-radius:8px;border:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.3)">
+                </div>
+                <div style="flex:1;min-width:250px">
+                    <h4 style="margin-bottom:12px;color:var(--text-bright)">Card Sections</h4>
+                    <div style="display:grid;gap:8px;font-size:13px">
+                        <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;border-left:3px solid var(--accent)">
+                            <strong style="color:var(--text-bright)">🖼️ Avatar Portrait</strong>
+                            <div style="color:var(--text-dim);margin-top:2px">The dino's headshot image fills the upper card area, behind the frame overlay.</div>
+                        </div>
+                        <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;border-left:3px solid var(--accent)">
+                            <strong style="color:var(--text-bright)">📛 Species Name</strong>
+                            <div style="color:var(--text-dim);margin-top:2px">The dinosaur's display name on the banner. Subspecies/mod info appears below.</div>
+                        </div>
+                        <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;border-left:3px solid #9b59b6">
+                            <strong style="color:#9b59b6">⚖️ CW — Combat Weight</strong>
+                            <div style="color:var(--text-dim);margin-top:2px">Determines damage scaling. Heavier dinos deal more damage to lighter ones.</div>
+                        </div>
+                        <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;border-left:3px solid #2ecc71">
+                            <strong style="color:#2ecc71">❤️ HP — Health Points</strong>
+                            <div style="color:var(--text-dim);margin-top:2px">Total hit points. When HP reaches 0, the dino is defeated.</div>
+                        </div>
+                        <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;border-left:3px solid #e74c3c">
+                            <strong style="color:#e74c3c">⚔️ ATK — Attack Power</strong>
+                            <div style="color:var(--text-dim);margin-top:2px">Base damage per hit. Modified by abilities, crits, and hit zones.</div>
+                        </div>
+                        <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;border-left:3px solid #3498db">
+                            <strong style="color:#3498db">🛡️ DEF — Defense Armor</strong>
+                            <div style="color:var(--text-dim);margin-top:2px">Damage multiplier. 1.0 = normal, higher = tankier. Reduces incoming damage.</div>
+                        </div>
+                        <div style="background:var(--bg3);padding:10px 14px;border-radius:6px;border-left:3px solid #f1c40f">
+                            <strong style="color:#f1c40f">⚡ SPD — Speed</strong>
+                            <div style="color:var(--text-dim);margin-top:2px">Determines attack initiative. Faster dinos strike first each turn.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </details>
+
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <h2 style="color:var(--text-bright);margin:0">🦖 Dinosaur Profiles ({len(all_dinos)})</h2>
             <button class="btn btn-success" onclick="document.getElementById('uploadModal').classList.add('active')">+ Create Profile</button>

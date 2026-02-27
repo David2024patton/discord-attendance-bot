@@ -3652,6 +3652,29 @@ async def dino(ctx, *, name: str = None):
     else:
         await ctx.send(embed=embed)
 
+@bot.command(help="Show an annotated guide explaining each section of a battle card.")
+async def battlehelp(ctx):
+    help_path = os.path.join(os.path.dirname(__file__), "assets", "card_help_guide.png")
+    embed = discord.Embed(
+        title="📖 Battle Card Anatomy Guide",
+        description="Each battle card displays your dinosaur's combat statistics. Here's what each section means:",
+        color=0xf1c40f
+    )
+    embed.add_field(name="🖼️ Avatar Portrait", value="The dino's headshot image fills the upper card area, behind the frame overlay.", inline=False)
+    embed.add_field(name="📛 Species Name", value="The dinosaur's display name on the banner. Subspecies/mod pack info appears below.", inline=False)
+    embed.add_field(name="⚖️ CW — Combat Weight", value="Determines damage scaling. Heavier dinos deal more damage to lighter ones via the PoT formula: `Damage = Base × (AtkCW / DefCW)`.", inline=False)
+    embed.add_field(name="❤️ HP — Health Points", value="Total hit points. When HP reaches 0, the dino is defeated. Below 25% HP, the dino may panic and flee.", inline=False)
+    embed.add_field(name="⚔️ ATK — Attack Power", value="Base damage per hit. Modified by abilities, critical hits, hit zones (Head 1.2x, Body 1.0x, Tail 0.25x, Flank 0.8x).", inline=False)
+    embed.add_field(name="🛡️ DEF — Defense Armor", value="Damage multiplier. 1.0 = normal, higher = tankier. Reduces all incoming damage.", inline=False)
+    embed.add_field(name="⚡ SPD — Speed", value="Determines attack initiative. Faster dinos strike first each turn (85% chance).", inline=False)
+    embed.set_footer(text="Use !dinobattle to start a fight • Oath Bot")
+    if os.path.exists(help_path):
+        file = discord.File(help_path, filename="card_help.png")
+        embed.set_image(url="attachment://card_help.png")
+        await ctx.send(embed=embed, file=file)
+    else:
+        await ctx.send(embed=embed)
+
 @bot.command(help="Show the top bettors for Dino Battles.")
 async def dinostats(ctx):
     lb = load_dino_lb()
