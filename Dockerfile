@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot code
 COPY bot.py .
 COPY dashboard.py .
+COPY battle_engine.py .
 COPY dinos.json .
 COPY scrape_wiki.py .
 COPY assets/ ./assets/

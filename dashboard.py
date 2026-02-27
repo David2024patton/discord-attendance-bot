@@ -10,6 +10,7 @@ import hashlib
 import secrets
 import time
 from collections import deque
+import battle_engine
 from datetime import datetime
 from aiohttp import web
 
@@ -1236,56 +1237,113 @@ async def dino_profile_page(request):
     }}
 
     async function battleAgain() {{
+        const panel = document.getElementById('battleResult');
+        const content = document.getElementById('battleContent');
+        const title = document.getElementById('battleTitle');
+        title.innerHTML = '⏳ Simulating battle...';
+        content.innerHTML = '';
+        panel.style.display = '';
+
         try {{
-            const r = await fetch('/api/dinos');
-            const allDinos = await r.json();
-            const me = allDinos.find(d => d.id === '{dino_id}');
+            // Get a random opponent
+            const rDinos = await fetch('/api/dinos');
+            const allDinos = await rDinos.json();
             const opponents = allDinos.filter(d => d.id !== '{dino_id}');
             if (opponents.length === 0) {{ alert('No opponents available!'); return; }}
             const opp = opponents[Math.floor(Math.random() * opponents.length)];
 
-            // Stat-based combat with randomness
-            const myPower = (me.atk || 50) * (me.hp || 500) * (me.spd || 500) / 1000000;
-            const oppPower = (opp.atk || 50) * (opp.hp || 500) * (opp.spd || 500) / 1000000;
-            const myRoll = myPower * (0.7 + Math.random() * 0.6);
-            const oppRoll = oppPower * (0.7 + Math.random() * 0.6);
-            const won = myRoll >= oppRoll;
+            // Run server-side battle simulation
+            const rBattle = await fetch('/api/battle', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{ attacker_id: '{dino_id}', defender_id: opp.id }})
+            }});
+            const result = await rBattle.json();
+            if (!result.ok) {{ alert(result.error || 'Battle failed'); return; }}
 
-            const panel = document.getElementById('battleResult');
-            const content = document.getElementById('battleContent');
-            const title = document.getElementById('battleTitle');
+            const won = result.winner === 'a';
+            const fa = result.fighter_a;
+            const fb = result.fighter_b;
 
             title.innerHTML = won
                 ? '<span style="color:var(--green)">⚔️ VICTORY!</span>'
                 : '<span style="color:var(--red)">⚔️ DEFEAT</span>';
 
-            const oppCol = opp.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
-            const myCol = me.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
+            // Fighter summary cards
+            const aCol = fa.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
+            const bCol = fb.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
+            const aHpPct = Math.max(0, Math.round(fa.hp / fa.max_hp * 100));
+            const bHpPct = Math.max(0, Math.round(fb.hp / fb.max_hp * 100));
 
-            content.innerHTML = ''
-                + '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center">'
-                + '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (won ? 'var(--green)' : 'var(--border)') + '">'
-                + '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + me.name + '</div>'
-                + '<div style="font-size:12px;color:' + myCol + ';margin-bottom:8px">' + (me.type || '').toUpperCase() + '</div>'
-                + '<div style="font-size:13px">ATK <strong>' + (me.atk||50) + '</strong> &middot; HP <strong>' + (me.hp||500) + '</strong> &middot; SPD <strong>' + (me.spd||500) + '</strong></div>'
-                + '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">Roll: ' + myRoll.toFixed(1) + '</div>'
-                + '</div>'
-                + '<div style="font-size:28px;font-weight:800;color:var(--text-dim)">VS</div>'
-                + '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (!won ? 'var(--green)' : 'var(--border)') + '">'
-                + '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + opp.name + '</div>'
-                + '<div style="font-size:12px;color:' + oppCol + ';margin-bottom:8px">' + (opp.type || '').toUpperCase() + '</div>'
-                + '<div style="font-size:13px">ATK <strong>' + (opp.atk||50) + '</strong> &middot; HP <strong>' + (opp.hp||500) + '</strong> &middot; SPD <strong>' + (opp.spd||500) + '</strong></div>'
-                + '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">Roll: ' + oppRoll.toFixed(1) + '</div>'
-                + '</div>'
-                + '</div>'
-                + '<div style="text-align:center;margin-top:16px">'
-                + '<button class="btn" onclick="battleAgain()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px">⚔️ Battle Again</button>'
-                + '</div>';
+            let html = '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center;margin-bottom:20px">';
 
-            panel.style.display = '';
+            // Fighter A card
+            html += '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (won ? 'var(--green)' : 'var(--border)') + '">';
+            html += '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + fa.name + '</div>';
+            html += '<div style="font-size:11px;color:' + aCol + ';margin-bottom:4px">' + fa.type.toUpperCase() + ' &middot; ' + (fa.family || 'generic').toUpperCase() + '</div>';
+            html += '<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">CW ' + fa.cw + ' &middot; Slots: ' + fa.group_slots + '</div>';
+            html += '<div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden;margin-bottom:4px">';
+            html += '<div style="width:' + aHpPct + '%;height:100%;background:' + (aHpPct > 50 ? 'var(--green)' : (aHpPct > 25 ? '#f1c40f' : 'var(--red)')) + ';border-radius:6px"></div></div>';
+            html += '<div style="font-size:12px;font-weight:700;color:var(--text-bright)">' + fa.hp + ' / ' + fa.max_hp + ' HP</div>';
+            html += '</div>';
+
+            // VS
+            html += '<div style="font-size:28px;font-weight:800;color:var(--text-dim)">VS</div>';
+
+            // Fighter B card
+            html += '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (!won ? 'var(--green)' : 'var(--border)') + '">';
+            html += '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + fb.name + '</div>';
+            html += '<div style="font-size:11px;color:' + bCol + ';margin-bottom:4px">' + fb.type.toUpperCase() + ' &middot; ' + (fb.family || 'generic').toUpperCase() + '</div>';
+            html += '<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">CW ' + fb.cw + ' &middot; Slots: ' + fb.group_slots + '</div>';
+            html += '<div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden;margin-bottom:4px">';
+            html += '<div style="width:' + bHpPct + '%;height:100%;background:' + (bHpPct > 50 ? 'var(--green)' : (bHpPct > 25 ? '#f1c40f' : 'var(--red)')) + ';border-radius:6px"></div></div>';
+            html += '<div style="font-size:12px;font-weight:700;color:var(--text-bright)">' + fb.hp + ' / ' + fb.max_hp + ' HP</div>';
+            html += '</div></div>';
+
+            // Round-by-round combat log
+            html += '<div style="background:var(--bg);border-radius:10px;padding:16px;max-height:400px;overflow-y:auto;font-family:monospace;font-size:13px;line-height:1.8">';
+            result.rounds.forEach(function(roundText) {{
+                // Bold round headers
+                let formatted = roundText
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/⚔️/g, '<span style="font-size:16px">⚔️</span>')
+                    .replace(/💀/g, '<span style="font-size:16px">💀</span>')
+                    .replace(/🩸/g, '<span style="color:var(--red)">🩸</span>')
+                    .replace(/🦴/g, '<span style="color:#f1c40f">🦴</span>')
+                    .replace(/🛡️/g, '<span style="color:var(--accent)">🛡️</span>')
+                    .replace(/💚/g, '<span style="color:var(--green)">💚</span>')
+                    .replace(/📊/g, '<span style="color:var(--accent)">📊</span>');
+                html += '<div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">' + formatted.replace(/\\n/g, '<br>') + '</div>';
+            }});
+            html += '</div>';
+
+            // Abilities used summary
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">';
+            [fa, fb].forEach(function(f) {{
+                html += '<div style="background:var(--bg3);border-radius:8px;padding:12px">';
+                html += '<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--text-bright)">' + f.name + ' &mdash; Abilities Used</div>';
+                const abilities = f.abilities_used || {{}};
+                if (Object.keys(abilities).length === 0) {{
+                    html += '<div style="color:var(--text-dim);font-size:12px">No abilities used</div>';
+                }} else {{
+                    Object.entries(abilities).forEach(function(entry) {{
+                        html += '<div style="font-size:12px;color:var(--text-dim)">' + entry[0] + ': <strong style="color:var(--text-bright)">' + entry[1] + 'x</strong></div>';
+                    }});
+                }}
+                html += '</div>';
+            }});
+            html += '</div>';
+
+            // Battle Again button
+            html += '<div style="text-align:center;margin-top:16px">';
+            html += '<button class="btn" onclick="battleAgain()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px">⚔️ Battle Again</button>';
+            html += '</div>';
+
+            content.innerHTML = html;
             panel.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }});
         }} catch(err) {{
-            alert('Battle error: ' + err);
+            title.innerHTML = '<span style="color:var(--red)">Battle Error</span>';
+            content.innerHTML = '<div style="color:var(--red);padding:16px">' + err + '</div>';
         }}
     }}
     </script>
@@ -3164,6 +3222,47 @@ async def api_dinos(request):
     load_dinos = _state_getters.get("load_dinos")
     dinos = load_dinos() if load_dinos else []
     return web.json_response(dinos)
+
+@routes.post("/api/battle")
+async def api_battle(request):
+    """Run a full battle simulation between two dinos using the battle engine."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    try:
+        data = await request.json()
+        attacker_id = data.get("attacker_id")
+        defender_id = data.get("defender_id")
+        if not attacker_id or not defender_id:
+            return web.json_response({"error": "attacker_id and defender_id required"}, status=400)
+
+        load_dinos = _state_getters.get("load_dinos")
+        if not load_dinos:
+            return web.json_response({"error": "Dino loader not available"}, status=500)
+        all_dinos = load_dinos()
+
+        attacker = next((d for d in all_dinos if d["id"] == attacker_id), None)
+        defender = next((d for d in all_dinos if d["id"] == defender_id), None)
+        if not attacker or not defender:
+            return web.json_response({"error": "Dino not found"}, status=404)
+
+        result = battle_engine.simulate_battle(attacker, defender)
+
+        # Flatten round logs for JSON
+        flat_rounds = []
+        for round_log in result["rounds"]:
+            flat_rounds.append("\n".join(round_log))
+
+        return web.json_response({
+            "ok": True,
+            "winner": result["winner"],
+            "winner_name": result["winner_name"],
+            "loser_name": result["loser_name"],
+            "rounds": flat_rounds,
+            "fighter_a": result["fighter_a"],
+            "fighter_b": result["fighter_b"],
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 @routes.post("/api/delete-card")
 async def api_delete_card(request):
