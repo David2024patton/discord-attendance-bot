@@ -411,6 +411,7 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
     side_b.apply_pack_bonuses()
 
     turns = []
+    hp_snapshots = []  # [{a_hp, a_max, b_hp, b_max}, ...]
     turn_num = 0
 
     # Prop bet tracking
@@ -585,6 +586,7 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
         b_max = sum(m.max_hp for m in side_b.members)
         lines.append(f"📊 {side_a.display_name}: {a_hp}/{a_max} HP ({side_a.alive_count} alive) | "
                      f"{side_b.display_name}: {b_hp}/{b_max} HP ({side_b.alive_count} alive)")
+        hp_snapshots.append({"a_hp": a_hp, "a_max": a_max, "b_hp": b_hp, "b_max": b_max})
 
         for m in side_a.alive_members + side_b.alive_members:
             m.tick_cooldowns()
@@ -612,6 +614,7 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
         "winner_name": w_side.display_name,
         "loser_name": l_side.display_name,
         "turns": turns,
+        "hp_snapshots": hp_snapshots,
         # Prop bet outcomes
         "any_fled": any_fled,
         "bleed_kills": bleed_kills,

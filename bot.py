@@ -3044,18 +3044,72 @@ async def dinobattle(ctx):
         )
         await ctx.send(embed=passive_embed)
     
-    # Post turns one at a time with delays
-    for turn_lines in result["turns"]:
-        turn_text = "\n".join(turn_lines)
-        # Truncate if over embed limit
-        if len(turn_text) > 1900:
-            turn_text = turn_text[:1900] + "..."
-        turn_embed = discord.Embed(
-            description=turn_text,
-            color=0xe67e22
+    # Post turns as a single live-updating embed with HP bars
+    def _hp_bar(hp, max_hp, width=10):
+        pct = max(0, hp / max_hp) if max_hp > 0 else 0
+        filled = round(pct * width)
+        empty = width - filled
+        if pct > 0.5:
+            return f"```ansi\n\u001b[0;32m{'█' * filled}{'░' * empty}\u001b[0m {hp}/{max_hp}\n```"
+        elif pct > 0.25:
+            return f"```ansi\n\u001b[0;33m{'█' * filled}{'░' * empty}\u001b[0m {hp}/{max_hp}\n```"
+        else:
+            return f"```ansi\n\u001b[0;31m{'█' * filled}{'░' * empty}\u001b[0m {hp}/{max_hp}\n```"
+
+    a_max = fa['max_hp']
+    b_max = fb['max_hp']
+    a_hp_current = a_max
+    b_hp_current = b_max
+    combat_lines = []
+    battle_embed = discord.Embed(title="⚔️ BATTLE IN PROGRESS", color=0xe67e22)
+    battle_msg = await ctx.send(embed=battle_embed)
+
+    for i, turn_lines in enumerate(result["turns"]):
+        # Get HP snapshot for this turn
+        if i < len(result.get("hp_snapshots", [])):
+            snap = result["hp_snapshots"][i]
+            a_hp_current = snap["a_hp"]
+            b_hp_current = snap["b_hp"]
+        elif i == len(result["turns"]) - 1:
+            # Last turn — use final HP from fighters
+            a_hp_current = fa['hp']
+            b_hp_current = fb['hp']
+
+        # Build HP bars header
+        hp_header = (
+            f"**{fa['name']}** {_hp_bar(max(0, a_hp_current), a_max)}"
+            f"**{fb['name']}** {_hp_bar(max(0, b_hp_current), b_max)}"
         )
-        await ctx.send(embed=turn_embed)
-        await asyncio.sleep(2)
+
+        # Add this turn's combat lines (strip the 📊 summary line)
+        for line in turn_lines:
+            if not line.startswith("📊"):
+                combat_lines.append(line)
+        
+        # Build combat log — keep last ~1500 chars to stay under embed limit
+        full_log = "\n".join(combat_lines)
+        if len(full_log) > 1500:
+            # Show only recent lines that fit
+            trimmed = []
+            total = 0
+            for line in reversed(combat_lines):
+                if total + len(line) + 1 > 1400:
+                    break
+                trimmed.insert(0, line)
+                total += len(line) + 1
+            full_log = "*...earlier rounds trimmed...*\n" + "\n".join(trimmed)
+        
+        desc = hp_header + "\n" + full_log
+        if len(desc) > 3900:
+            desc = desc[:3900] + "..."
+
+        battle_embed.description = desc
+        battle_embed.title = f"⚔️ Turn {i+1} of {len(result['turns'])}"
+        try:
+            await battle_msg.edit(embed=battle_embed)
+        except:
+            pass
+        await asyncio.sleep(3)
 
     # Determine winner & loser
     winner = None
