@@ -2765,6 +2765,14 @@ class DinoPostBattleView(discord.ui.View):
         embed, file = await _build_dino_lb_embed(interaction.client, lb)
         await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
 
+    async def dino_lb_callback(self, interaction: discord.Interaction):
+        stats = load_dino_stats()
+        if not stats:
+            await interaction.response.send_message("No dino battles recorded yet!", ephemeral=True)
+            return
+        embed, file = _build_dino_stats_embed(stats)
+        await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
+
     async def menu_callback(self, interaction: discord.Interaction):
         view = HelpView(interaction.user.id, show_admin=False)
         embed = _build_everyone_embed()
@@ -3260,22 +3268,13 @@ async def dinobattle(ctx):
             if not line.startswith("📊"):
                 combat_lines.append(line)
         
-        # Build combat log — keep last ~1500 chars to stay under embed limit
-        full_log = "\n".join(combat_lines)
-        if len(full_log) > 1500:
-            # Show only recent lines that fit
-            trimmed = []
-            total = 0
-            for line in reversed(combat_lines):
-                if total + len(line) + 1 > 1400:
-                    break
-                trimmed.insert(0, line)
-                total += len(line) + 1
-            full_log = "*...earlier rounds trimmed...*\n" + "\n".join(trimmed)
+        # Only show last 8 combat lines — keeps HP bars always visible
+        recent = combat_lines[-8:]
+        full_log = "\n".join(recent)
         
         desc = hp_header + "\n" + full_log
         if len(desc) > 3900:
-            desc = desc[:3900] + "..."
+            desc = desc[-3900:]
 
         battle_embed.description = desc
         battle_embed.title = f"⚔️ Turn {i+1} of {len(result['turns'])}"
