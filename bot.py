@@ -1196,7 +1196,8 @@ def _render_vs_image(dino_a, dino_b):
     CARD_WIDTH = 300
     CARD_HEIGHT = 450
     PADDING = 40
-    TOTAL_WIDTH = (CARD_WIDTH * 2) + (PADDING * 3)
+    CENTER_GAP = 80
+    TOTAL_WIDTH = (CARD_WIDTH * 2) + (PADDING * 2) + CENTER_GAP
     TOTAL_HEIGHT = CARD_HEIGHT + (PADDING * 2)
 
     BG_COLOR = (20, 22, 25)
@@ -1235,7 +1236,7 @@ def _render_vs_image(dino_a, dino_b):
                              radius=10, outline=GOLD_DIM, width=2)
 
         # Name banner bar (dark semi-transparent strip across middle)
-        banner_y = int(h * 0.50)
+        banner_y = int(h * 0.47)
         banner_h = 48
         fd.rectangle([(BORDER_W+3, banner_y), (w-BORDER_W-3, banner_y + banner_h)], fill=DARK)
         fd.line([(BORDER_W+3, banner_y), (w-BORDER_W-3, banner_y)], fill=GOLD, width=2)
@@ -1330,7 +1331,7 @@ def _render_vs_image(dino_a, dino_b):
                 pass
 
         # Name banner area (below portrait, in frame banner region)
-        name_y = PADDING + int(CARD_HEIGHT * 0.54)
+        name_y = PADDING + int(CARD_HEIGHT * 0.50)
         name_x = x_offset + (CARD_WIDTH - name_w) // 2
 
         # Shadow + main text for legibility
@@ -1348,8 +1349,8 @@ def _render_vs_image(dino_a, dino_b):
             draw.text((sub_x, sub_y), subtitle, fill=(180, 180, 180), font=font_sub)
 
         # Stats — rendered as compact badges in the lower portion of the card
-        stats_y = PADDING + int(CARD_HEIGHT * 0.67)
-        stat_spacing = 30
+        stats_y = PADDING + int(CARD_HEIGHT * 0.62)
+        stat_spacing = 27
         stats = [
             ("CW", str(dino.get('cw', 3000)), (155, 89, 182)),
             ("HP", str(dino.get('hp', 500)), (46, 204, 113)),
@@ -1390,7 +1391,7 @@ def _render_vs_image(dino_a, dino_b):
     draw_card(PADDING, dino_a, "left")
 
     # Draw VS badge in center
-    vs_x = PADDING + CARD_WIDTH + (PADDING // 2)
+    vs_x = PADDING + CARD_WIDTH + (CENTER_GAP // 2)
     vs_y = (TOTAL_HEIGHT // 2)
     # VS circle background
     circle_r = 28
@@ -1404,7 +1405,7 @@ def _render_vs_image(dino_a, dino_b):
     draw.text((vs_x - vs_tw // 2, vs_y - vs_th // 2 - 4), "VS", fill=TEXT_COLOR, font=font_vs)
 
     # Draw Card B
-    draw_card(PADDING * 2 + CARD_WIDTH, dino_b, "right")
+    draw_card(PADDING + CARD_WIDTH + CENTER_GAP, dino_b, "right")
 
     # Convert to RGB for PNG save (Discord doesn't handle RGBA well)
     final = Image.new("RGB", img.size, BG_COLOR)
