@@ -2526,27 +2526,68 @@ class DinoBattleView(discord.ui.View):
         super().__init__(timeout=60) # Bets close in 60 seconds
         self.dino_a = dino_a
         self.dino_b = dino_b
+        # Winner bets
         self.bets_a = set()
         self.bets_b = set()
         self.bets_tie = set()
+        # Prop bets
+        self.prop_flee_yes = set()
+        self.prop_flee_no = set()
+        self.prop_bleed_kill = set()
+        self.prop_first_crit_a = set()
+        self.prop_first_crit_b = set()
+        self.prop_ko_over = set()   # 2+ KOs
+        self.prop_ko_under = set()  # 0-1 KOs
         
-        btn_a = discord.ui.Button(label=f"Bet on {dino_a['name']}", style=discord.ButtonStyle.danger if dino_a['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_a", row=0)
+        # Row 0: Winner bets
+        btn_a = discord.ui.Button(label=f"🏆 {dino_a['name']}", style=discord.ButtonStyle.danger if dino_a['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_a", row=0)
         btn_a.callback = self.bet_a_callback
         self.add_item(btn_a)
 
-        btn_tie = discord.ui.Button(label="Bet on Tie", style=discord.ButtonStyle.secondary, custom_id="bet_tie", row=0)
+        btn_tie = discord.ui.Button(label="⚖️ Tie", style=discord.ButtonStyle.secondary, custom_id="bet_tie", row=0)
         btn_tie.callback = self.bet_tie_callback
         self.add_item(btn_tie)
 
-        btn_b = discord.ui.Button(label=f"Bet on {dino_b['name']}", style=discord.ButtonStyle.danger if dino_b['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_b", row=0)
+        btn_b = discord.ui.Button(label=f"🏆 {dino_b['name']}", style=discord.ButtonStyle.danger if dino_b['type'] == 'carnivore' else discord.ButtonStyle.success, custom_id="bet_b", row=0)
         btn_b.callback = self.bet_b_callback
         self.add_item(btn_b)
 
-        btn_lb = discord.ui.Button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, custom_id="bet_lb", row=1)
+        # Row 1: Prop bets — Flee & Bleed Kill
+        btn_flee_yes = discord.ui.Button(label="🏃 Flee: Yes", style=discord.ButtonStyle.primary, custom_id="prop_flee_yes", row=1)
+        btn_flee_yes.callback = self.prop_flee_yes_cb
+        self.add_item(btn_flee_yes)
+
+        btn_flee_no = discord.ui.Button(label="🏃 Flee: No", style=discord.ButtonStyle.secondary, custom_id="prop_flee_no", row=1)
+        btn_flee_no.callback = self.prop_flee_no_cb
+        self.add_item(btn_flee_no)
+
+        btn_bleed = discord.ui.Button(label="🩸 Bleed Kill", style=discord.ButtonStyle.danger, custom_id="prop_bleed", row=1)
+        btn_bleed.callback = self.prop_bleed_kill_cb
+        self.add_item(btn_bleed)
+
+        # Row 2: Prop bets — First Crit & KO Count
+        btn_crit_a = discord.ui.Button(label=f"⚡ 1st Crit: {dino_a['name'][:10]}", style=discord.ButtonStyle.primary, custom_id="prop_crit_a", row=2)
+        btn_crit_a.callback = self.prop_first_crit_a_cb
+        self.add_item(btn_crit_a)
+
+        btn_crit_b = discord.ui.Button(label=f"⚡ 1st Crit: {dino_b['name'][:10]}", style=discord.ButtonStyle.primary, custom_id="prop_crit_b", row=2)
+        btn_crit_b.callback = self.prop_first_crit_b_cb
+        self.add_item(btn_crit_b)
+
+        btn_ko_over = discord.ui.Button(label="💀 KOs: 2+", style=discord.ButtonStyle.danger, custom_id="prop_ko_over", row=2)
+        btn_ko_over.callback = self.prop_ko_over_cb
+        self.add_item(btn_ko_over)
+
+        btn_ko_under = discord.ui.Button(label="💀 KOs: 0-1", style=discord.ButtonStyle.secondary, custom_id="prop_ko_under", row=2)
+        btn_ko_under.callback = self.prop_ko_under_cb
+        self.add_item(btn_ko_under)
+
+        # Row 3: LB & Menu
+        btn_lb = discord.ui.Button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, custom_id="bet_lb", row=3)
         btn_lb.callback = self.lb_callback
         self.add_item(btn_lb)
 
-        btn_menu = discord.ui.Button(label="📚 Menu", style=discord.ButtonStyle.primary, custom_id="bet_menu", row=1)
+        btn_menu = discord.ui.Button(label="📚 Menu", style=discord.ButtonStyle.primary, custom_id="bet_menu", row=3)
         btn_menu.callback = self.menu_callback
         self.add_item(btn_menu)
 
@@ -2559,39 +2600,47 @@ class DinoBattleView(discord.ui.View):
             await interaction.response.send_message(f"You already bet on **{bet_name}**!", ephemeral=True)
             return
         target_set.add(user_id)
-        await interaction.response.send_message(f"🎟️ Locked in your bet for **{bet_name}**!", ephemeral=True)
+        await interaction.response.send_message(f"🎟️ Locked in: **{bet_name}**!", ephemeral=True)
 
-    async def bet_a_callback(self, interaction: discord.Interaction):
-        await self._handle_bet(interaction, self.bets_a, [self.bets_b, self.bets_tie], self.dino_a['name'])
+    async def _handle_prop(self, interaction, target_set, other_set, prop_name):
+        user_id = interaction.user.id
+        if user_id in other_set:
+            other_set.remove(user_id)
+        if user_id in target_set:
+            await interaction.response.send_message(f"You already bet **{prop_name}**!", ephemeral=True)
+            return
+        target_set.add(user_id)
+        await interaction.response.send_message(f"🎲 Prop bet locked: **{prop_name}**!", ephemeral=True)
 
-    async def bet_tie_callback(self, interaction: discord.Interaction):
-        await self._handle_bet(interaction, self.bets_tie, [self.bets_a, self.bets_b], "Tie")
+    # Winner bets
+    async def bet_a_callback(self, interaction): await self._handle_bet(interaction, self.bets_a, [self.bets_b, self.bets_tie], self.dino_a['name'])
+    async def bet_tie_callback(self, interaction): await self._handle_bet(interaction, self.bets_tie, [self.bets_a, self.bets_b], "Tie")
+    async def bet_b_callback(self, interaction): await self._handle_bet(interaction, self.bets_b, [self.bets_a, self.bets_tie], self.dino_b['name'])
 
-    async def bet_b_callback(self, interaction: discord.Interaction):
-        await self._handle_bet(interaction, self.bets_b, [self.bets_a, self.bets_tie], self.dino_b['name'])
+    # Prop bets
+    async def prop_flee_yes_cb(self, interaction): await self._handle_prop(interaction, self.prop_flee_yes, self.prop_flee_no, "🏃 Flee: Yes")
+    async def prop_flee_no_cb(self, interaction): await self._handle_prop(interaction, self.prop_flee_no, self.prop_flee_yes, "🏃 Flee: No")
+    async def prop_bleed_kill_cb(self, interaction): await self._handle_prop(interaction, self.prop_bleed_kill, set(), "🩸 Bleed Kill")
+    async def prop_first_crit_a_cb(self, interaction): await self._handle_prop(interaction, self.prop_first_crit_a, self.prop_first_crit_b, f"⚡ 1st Crit: {self.dino_a['name']}")
+    async def prop_first_crit_b_cb(self, interaction): await self._handle_prop(interaction, self.prop_first_crit_b, self.prop_first_crit_a, f"⚡ 1st Crit: {self.dino_b['name']}")
+    async def prop_ko_over_cb(self, interaction): await self._handle_prop(interaction, self.prop_ko_over, self.prop_ko_under, "💀 KOs: 2+")
+    async def prop_ko_under_cb(self, interaction): await self._handle_prop(interaction, self.prop_ko_under, self.prop_ko_over, "💀 KOs: 0-1")
 
     async def lb_callback(self, interaction: discord.Interaction):
         lb = load_dino_lb()
         if not lb:
             await interaction.response.send_message("No Dino Battle bets on record yet!", ephemeral=True)
             return
-        sorted_lb = sorted(lb.items(), key=lambda x: x[1]['wins'], reverse=True)
-        desc = []
-        for rank, (uid_str, stats) in enumerate(sorted_lb[:15]):
-            user = await interaction.client.fetch_user(int(uid_str))
-            name = user.display_name if user else f"User {uid_str}"
-            w, l, t = stats['wins'], stats['losses'], stats['ties']
-            s, bs = stats.get('streak', 0), stats.get('best_streak', 0)
-            desc.append(f"**#{rank+1}** {name} — **{w}** W / **{l}** L / **{t}** Ties | Streak: 🔥{s} (Best: {bs})")
-        embed = discord.Embed(title="🦖 Dino Battle Leaderboard 🦕", description="\n".join(desc), color=0xf1c40f)
+        embed = await _build_dino_lb_embed(interaction.client, lb)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def menu_callback(self, interaction: discord.Interaction):
-        is_admin = False # Simplification
+        is_admin = False
         view = HelpView(interaction.user.id, show_admin=is_admin)
         embed = _build_everyone_embed()
         embed.set_footer(text="Session buttons: Attend · Standby · Not Attending · Relieve Spot")
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
 class DinoPostBattleView(discord.ui.View):
     def __init__(self):
@@ -2608,15 +2657,7 @@ class DinoPostBattleView(discord.ui.View):
         if not lb:
             await interaction.response.send_message("No Dino Battle bets on record yet!", ephemeral=True)
             return
-        sorted_lb = sorted(lb.items(), key=lambda x: x[1]['wins'], reverse=True)
-        desc = []
-        for rank, (uid_str, stats) in enumerate(sorted_lb[:15]):
-            user = await interaction.client.fetch_user(int(uid_str))
-            name = user.display_name if user else f"User {uid_str}"
-            w, l, t = stats['wins'], stats['losses'], stats['ties']
-            s, bs = stats.get('streak', 0), stats.get('best_streak', 0)
-            desc.append(f"**#{rank+1}** {name} — **{w}** W / **{l}** L / **{t}** Ties | Streak: 🔥{s} (Best: {bs})")
-        embed = discord.Embed(title="🦖 Dino Battle Leaderboard 🦕", description="\n".join(desc), color=0xf1c40f)
+        embed = await _build_dino_lb_embed(interaction.client, lb)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def menu_callback(self, interaction: discord.Interaction):
@@ -2624,6 +2665,146 @@ class DinoPostBattleView(discord.ui.View):
         embed = _build_everyone_embed()
         embed.set_footer(text="Session buttons: Attend · Standby · Not Attending · Relieve Spot")
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+# ---- Weekly Champion & Enhanced Leaderboard ----
+def _get_week_key():
+    """Return the ISO week key 'YYYY-WNN' for the current week."""
+    now = datetime.now(EST)
+    return now.strftime("%G-W%V")
+
+def _ensure_lb_fields(entry):
+    """Ensure a leaderboard entry has all required fields."""
+    entry.setdefault("wins", 0)
+    entry.setdefault("losses", 0)
+    entry.setdefault("ties", 0)
+    entry.setdefault("streak", 0)
+    entry.setdefault("best_streak", 0)
+    entry.setdefault("prop_wins", 0)
+    entry.setdefault("prop_losses", 0)
+    entry.setdefault("weekly", {})
+    entry.setdefault("champion_stars", 0)
+    return entry
+
+def _record_weekly_win(lb, user_id_str):
+    """Increment this user's wins for the current week."""
+    entry = _ensure_lb_fields(lb.setdefault(user_id_str, {}))
+    week = _get_week_key()
+    if week not in entry["weekly"]:
+        entry["weekly"][week] = {"wins": 0, "losses": 0, "prop_wins": 0}
+    entry["weekly"][week]["wins"] += 1
+
+def _record_weekly_loss(lb, user_id_str):
+    entry = _ensure_lb_fields(lb.setdefault(user_id_str, {}))
+    week = _get_week_key()
+    if week not in entry["weekly"]:
+        entry["weekly"][week] = {"wins": 0, "losses": 0, "prop_wins": 0}
+    entry["weekly"][week]["losses"] += 1
+
+def _record_weekly_prop(lb, user_id_str):
+    entry = _ensure_lb_fields(lb.setdefault(user_id_str, {}))
+    week = _get_week_key()
+    if week not in entry["weekly"]:
+        entry["weekly"][week] = {"wins": 0, "losses": 0, "prop_wins": 0}
+    entry["weekly"][week]["prop_wins"] += 1
+
+def _check_award_champion(lb):
+    """Check previous week and award ⭐ to the top winner if not already awarded."""
+    now = datetime.now(EST)
+    # Get previous week key
+    prev = now - timedelta(days=7)
+    prev_week = prev.strftime("%G-W%V")
+    current_week = _get_week_key()
+    if prev_week == current_week:
+        return None  # Same week, skip
+
+    # Find the top winner for previous week
+    best_uid = None
+    best_wins = 0
+    for uid, entry in lb.items():
+        _ensure_lb_fields(entry)
+        wk = entry.get("weekly", {}).get(prev_week, {})
+        w = wk.get("wins", 0)
+        if w > best_wins:
+            best_wins = w
+            best_uid = uid
+
+    if best_uid and best_wins > 0:
+        # Check if already awarded this week
+        entry = lb[best_uid]
+        awarded_weeks = entry.get("_awarded_weeks", [])
+        if prev_week not in awarded_weeks:
+            entry["champion_stars"] = entry.get("champion_stars", 0) + 1
+            entry.setdefault("_awarded_weeks", []).append(prev_week)
+            return best_uid
+    return None
+
+
+async def _build_dino_lb_embed(client, lb):
+    """Build an enhanced leaderboard embed with weekly champion pinned."""
+    week = _get_week_key()
+    
+    # Check for previous week champion
+    champion_uid = _check_award_champion(lb)
+    save_dino_lb(lb)
+
+    # Find current week's leader
+    weekly_leader_uid = None
+    weekly_leader_wins = 0
+    for uid, entry in lb.items():
+        _ensure_lb_fields(entry)
+        wk = entry.get("weekly", {}).get(week, {})
+        w = wk.get("wins", 0)
+        if w > weekly_leader_wins:
+            weekly_leader_wins = w
+            weekly_leader_uid = uid
+
+    sorted_lb = sorted(lb.items(), key=lambda x: x[1].get('wins', 0), reverse=True)
+    desc_lines = []
+
+    # Pin weekly leader at top
+    if weekly_leader_uid and weekly_leader_wins > 0:
+        try:
+            user = await client.fetch_user(int(weekly_leader_uid))
+            wl_name = user.display_name if user else f"User {weekly_leader_uid}"
+        except:
+            wl_name = f"User {weekly_leader_uid}"
+        stars = lb[weekly_leader_uid].get("champion_stars", 0)
+        star_txt = f" ⭐ x{stars}" if stars > 0 else ""
+        desc_lines.append(f"👑 **WEEKLY LEADER**: **{wl_name}** — {weekly_leader_wins} wins this week{star_txt}")
+        desc_lines.append("─" * 30)
+
+    for rank, (uid_str, stats) in enumerate(sorted_lb[:15]):
+        _ensure_lb_fields(stats)
+        try:
+            user = await client.fetch_user(int(uid_str))
+            name = user.display_name if user else f"User {uid_str}"
+        except:
+            name = f"User {uid_str}"
+
+        w, l, t = stats['wins'], stats['losses'], stats['ties']
+        s, bs = stats.get('streak', 0), stats.get('best_streak', 0)
+        pw, pl = stats.get('prop_wins', 0), stats.get('prop_losses', 0)
+        stars = stats.get('champion_stars', 0)
+        star_txt = f" ⭐x{stars}" if stars > 0 else ""
+
+        # Weekly stats
+        wk = stats.get("weekly", {}).get(week, {})
+        wk_w = wk.get("wins", 0)
+        wk_pw = wk.get("prop_wins", 0)
+
+        line = f"**#{rank+1}** {name}{star_txt}\n"
+        line += f"  {w}W / {l}L / {t}T | 🔥{s} (Best: {bs})\n"
+        line += f"  Props: {pw}W/{pl}L | This week: {wk_w}W, {wk_pw} props"
+        desc_lines.append(line)
+
+    embed = discord.Embed(
+        title="🦖 Oath Bot — Battle Leaderboard 🦕",
+        description="\n".join(desc_lines) if desc_lines else "No bets yet!",
+        color=0xf1c40f
+    )
+    embed.set_footer(text=f"Week: {week} • ⭐ = Weekly Champion titles")
+    return embed
 
 @bot.command(help="Start a dinosaur battle! Users have 60s to bet.")
 
@@ -2648,20 +2829,14 @@ async def dinobattle(ctx):
         d.setdefault('spd', 500)
         d['pack_size'] = 1
 
-    # Pack Mechanics
+    # Pack Mechanics — engine handles individual members
     cw_ratio = float(dino_a['cw']) / float(dino_b['cw'])
     if cw_ratio > 3.0: # A is > 3x the size of B
         pack = random.randint(3, 8)
         dino_b['pack_size'] = pack
-        dino_b['name'] = f"Pack of {pack} {dino_b['name']}s"
-        dino_b['hp'] *= pack
-        dino_b['atk'] *= pack
     elif cw_ratio < 0.33: # B is > 3x the size of A
         pack = random.randint(3, 8)
         dino_a['pack_size'] = pack
-        dino_a['name'] = f"Pack of {pack} {dino_a['name']}s"
-        dino_a['hp'] *= pack
-        dino_a['atk'] *= pack
 
     await ctx.send("⚔️ **Generating fighters...**")
     
@@ -2794,36 +2969,94 @@ async def dinobattle(ctx):
         )
         attachments = []
         
-    # --- Leaderboard Updates ---
+    # --- Leaderboard Updates (Winner + Prop Bets) ---
     lb = load_dino_lb()
     all_bettors = view.bets_a.union(view.bets_b).union(view.bets_tie)
     for u in all_bettors:
         u_str = str(u)
-        if u_str not in lb:
-            lb[u_str] = {"wins": 0, "losses": 0, "ties": 0, "streak": 0, "best_streak": 0}
+        _ensure_lb_fields(lb.setdefault(u_str, {}))
             
     if winner:
         for u in all_bettors:
             u_str = str(u)
+            _ensure_lb_fields(lb.setdefault(u_str, {}))
             if u in winning_bets:
                 lb[u_str]["wins"] += 1
                 lb[u_str]["streak"] = lb[u_str].get("streak", 0) + 1
                 if lb[u_str]["streak"] > lb[u_str].get("best_streak", 0):
                     lb[u_str]["best_streak"] = lb[u_str]["streak"]
+                _record_weekly_win(lb, u_str)
             else:
                 lb[u_str]["losses"] += 1
                 lb[u_str]["streak"] = 0
+                _record_weekly_loss(lb, u_str)
     else:
         for u in all_bettors:
             u_str = str(u)
+            _ensure_lb_fields(lb.setdefault(u_str, {}))
             if u in view.bets_tie:
                 lb[u_str]["wins"] += 1
                 lb[u_str]["streak"] = lb[u_str].get("streak", 0) + 1
                 if lb[u_str]["streak"] > lb[u_str].get("best_streak", 0):
                     lb[u_str]["best_streak"] = lb[u_str]["streak"]
+                _record_weekly_win(lb, u_str)
             else:
                 lb[u_str]["ties"] += 1
                 lb[u_str]["streak"] = 0
+                _record_weekly_loss(lb, u_str)
+
+    # --- Prop Bet Resolution ---
+    prop_results = []
+    # Flee
+    flee_winners = view.prop_flee_yes if result.get("any_fled") else view.prop_flee_no
+    flee_losers = view.prop_flee_no if result.get("any_fled") else view.prop_flee_yes
+    if flee_winners or flee_losers:
+        prop_results.append(f"🏃 **Flee**: {'Yes! Someone fled!' if result.get('any_fled') else 'No fleeing occurred'}")
+
+    # Bleed Kill
+    bleed_hit = result.get("bleed_kills", 0) > 0
+    bleed_winners = view.prop_bleed_kill if bleed_hit else set()
+    bleed_losers = view.prop_bleed_kill if not bleed_hit else set()
+    if view.prop_bleed_kill:
+        prop_results.append(f"🩸 **Bleed Kill**: {'Yes! {0} killed by bleed!'.format(result.get('bleed_kills', 0)) if bleed_hit else 'No bleed kills'}")
+
+    # First Crit
+    first_crit = result.get("first_crit_side")
+    crit_winners = set()
+    crit_losers = set()
+    if first_crit == "a":
+        crit_winners = view.prop_first_crit_a
+        crit_losers = view.prop_first_crit_b
+    elif first_crit == "b":
+        crit_winners = view.prop_first_crit_b
+        crit_losers = view.prop_first_crit_a
+    if view.prop_first_crit_a or view.prop_first_crit_b:
+        if first_crit:
+            crit_name = dino_a['name'] if first_crit == 'a' else dino_b['name']
+            prop_results.append(f"⚡ **First Crit**: {crit_name} landed it!")
+        else:
+            prop_results.append("⚡ **First Crit**: No critical hits occurred!")
+
+    # KO Count
+    total_kos = result.get("total_kos", 0)
+    ko_over = total_kos >= 2
+    ko_winners = view.prop_ko_over if ko_over else view.prop_ko_under
+    ko_losers = view.prop_ko_under if ko_over else view.prop_ko_over
+    if view.prop_ko_over or view.prop_ko_under:
+        prop_results.append(f"💀 **KO Count**: {total_kos} total KOs ({'Over 2+!' if ko_over else 'Under!'})")
+
+    # Tally prop wins/losses
+    all_prop_winners = flee_winners | bleed_winners | crit_winners | ko_winners
+    all_prop_losers = flee_losers | bleed_losers | crit_losers | ko_losers
+    for u in all_prop_winners:
+        u_str = str(u)
+        _ensure_lb_fields(lb.setdefault(u_str, {}))
+        lb[u_str]["prop_wins"] = lb[u_str].get("prop_wins", 0) + 1
+        _record_weekly_prop(lb, u_str)
+    for u in all_prop_losers:
+        u_str = str(u)
+        _ensure_lb_fields(lb.setdefault(u_str, {}))
+        lb[u_str]["prop_losses"] = lb[u_str].get("prop_losses", 0) + 1
                 
     save_dino_lb(lb)
 
@@ -2834,6 +3067,14 @@ async def dinobattle(ctx):
         win_embed.add_field(name="🎉 Winning Bets!", value=mentions, inline=False)
     else:
         win_embed.add_field(name="📉 Bets", value="No one guessed correctly!", inline=False)
+
+    # Prop bet results display
+    if prop_results:
+        prop_text = "\n".join(prop_results)
+        if all_prop_winners:
+            prop_mentions = " ".join([f"<@{uid}>" for uid in all_prop_winners])
+            prop_text += f"\n\n🎲 **Prop Winners**: {prop_mentions}"
+        win_embed.add_field(name="🎲 Prop Bet Results", value=prop_text, inline=False)
         
     post_view = DinoPostBattleView()
     if attachments:

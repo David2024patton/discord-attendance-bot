@@ -402,8 +402,7 @@ def apply_effects(ability, attacker: PackMember, defender: PackMember, lines):
 def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
     """
     Turn-by-turn battle with individual pack members.
-    Each member has their own HP, abilities, status effects,
-    and can die or flee independently.
+    Tracks prop bet outcomes: flee, bleed kills, first crit, KO count.
     """
     side_a = BattleSide(dino_a_data, pack_size=pack_a)
     side_b = BattleSide(dino_b_data, pack_size=pack_b)
@@ -414,33 +413,58 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
     turns = []
     turn_num = 0
 
+    # Prop bet tracking
+    any_fled = False
+    bleed_kills = 0
+    first_crit_side = None  # "a" or "b"
+    total_kos = 0
+    # Track which members have already been counted as dead
+    dead_set = set()
+
+    def _check_new_deaths(side, side_label):
+        nonlocal total_kos
+        count = 0
+        for m in side.members:
+            mid = id(m)
+            if m.hp <= 0 and mid not in dead_set:
+                dead_set.add(mid)
+                total_kos += 1
+                count += 1
+        return count
+
     while side_a.alive and side_b.alive and turn_num < max_turns:
         turn_num += 1
         lines = [f"⚔️ **Turn {turn_num}**"]
 
-        # Show alive counts for packs
         if side_a.pack_size > 1 or side_b.pack_size > 1:
             lines.append(f"  📋 {side_a.display_name}: {side_a.alive_count}/{side_a.pack_size} alive | "
                          f"{side_b.display_name}: {side_b.alive_count}/{side_b.pack_size} alive")
 
-        # Status effect ticks for all alive members
+        # Status effect ticks
         for m in side_a.alive_members + side_b.alive_members:
+            hp_before = m.hp
             for log_line in m.tick_status_effects():
                 lines.append(log_line)
+            # Bleed kill check
+            if hp_before > 0 and m.hp <= 0:
+                if any(e["type"] == "bleed" for e in m.status_effects) or hp_before > m.hp:
+                    bleed_kills += 1
 
-        # Check for bleed deaths
+        # Check bleed deaths
         for m in side_a.members + side_b.members:
-            if m.hp <= 0 and not m.fled:
-                side_name = side_a.display_name if m in side_a.members else side_b.display_name
+            if m.hp <= 0 and id(m) not in dead_set:
                 lines.append(f"  💀 {m.label} succumbs to their wounds!")
+                dead_set.add(id(m))
+                total_kos += 1
 
         if not side_a.alive or not side_b.alive:
             turns.append(lines)
             break
 
-        # Flee checks for all alive members
+        # Flee checks
         for m in side_a.alive_members + side_b.alive_members:
             if m.check_flee():
+                any_fled = True
                 lines.append(f"  🏃 {m.label} panics and **flees** the battle! ({m.hp}/{m.max_hp} HP)")
 
         if not side_a.alive or not side_b.alive:
@@ -451,10 +475,13 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
             turns.append(lines)
             break
 
-        # Determine who goes first (faster side, with 15% upset chance)
+        # Speed-based initiative
         first_side, second_side = (side_a, side_b) if side_a.cw <= side_b.cw else (side_b, side_a)
+        first_label = "a" if first_side is side_a else "b"
+        second_label = "b" if first_label == "a" else "a"
         if random.random() < 0.15:
             first_side, second_side = second_side, first_side
+            first_label, second_label = second_label, first_label
 
         # ── First side attacks ──
         attacker = first_side.pick_attacker()
@@ -465,6 +492,8 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
 
             if ability["base"] > 0:
                 dmg, zone, crit, dodge = calc_pot_damage(attacker, target, ability)
+                if crit and first_crit_side is None:
+                    first_crit_side = first_label
                 if dodge:
                     lines.append(f"{attacker.label} uses **{ability['name']}** ({ability['desc']}) → {target.label} **dodges!** 💨")
                 else:
@@ -476,6 +505,7 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
                     lines.append(f"  ↳ {target.label}: {target.hp}/{target.max_hp} HP")
                     if target.hp <= 0:
                         lines.append(f"  💀 **{target.label}** has been defeated!")
+                        _check_new_deaths(second_side, second_label)
             else:
                 lines.append(f"{attacker.label} uses **{ability['name']}** ({ability['desc']})")
 
@@ -494,6 +524,8 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
 
             if ability2["base"] > 0:
                 dmg2, zone2, crit2, dodge2 = calc_pot_damage(attacker2, target2, ability2)
+                if crit2 and first_crit_side is None:
+                    first_crit_side = second_label
                 if dodge2:
                     lines.append(f"{attacker2.label} uses **{ability2['name']}** ({ability2['desc']}) → {target2.label} **dodges!** 💨")
                 else:
@@ -505,6 +537,7 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
                     lines.append(f"  ↳ {target2.label}: {target2.hp}/{target2.max_hp} HP")
                     if target2.hp <= 0:
                         lines.append(f"  💀 **{target2.label}** has been defeated!")
+                        _check_new_deaths(first_side, first_label)
             else:
                 lines.append(f"{attacker2.label} uses **{ability2['name']}** ({ability2['desc']})")
 
@@ -514,9 +547,9 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
             turns.append(lines)
             break
 
-        # Extra pack attacks (in larger packs, more members get to swing)
-        # Each additional alive member beyond 1 gets a 60% chance to also attack
+        # Extra pack attacks
         for extra_side, target_side in [(first_side, second_side), (second_side, first_side)]:
+            ex_label = "a" if extra_side is side_a else "b"
             extras = [m for m in extra_side.alive_members if m != attacker and m != attacker2]
             for em in extras:
                 if not target_side.alive:
@@ -528,6 +561,8 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
                         em.cooldowns[ea["name"]] = ea["cd"]
                         if ea["base"] > 0:
                             ed, ez, ec, edg = calc_pot_damage(em, et, ea)
+                            if ec and first_crit_side is None:
+                                first_crit_side = ex_label
                             if edg:
                                 lines.append(f"{em.label} also attacks with **{ea['name']}** → {et.label} **dodges!** 💨")
                             else:
@@ -536,13 +571,14 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
                                 lines.append(f"  ↳ {et.label}: {et.hp}/{et.max_hp} HP")
                                 if et.hp <= 0:
                                     lines.append(f"  💀 **{et.label}** has been defeated!")
+                                    _check_new_deaths(target_side, "a" if target_side is side_a else "b")
                             apply_effects(ea, em, et, lines)
 
         if not side_a.alive or not side_b.alive:
             turns.append(lines)
             break
 
-        # Turn summary — total HP remaining
+        # Turn summary
         a_hp = sum(m.hp for m in side_a.alive_members)
         a_max = sum(m.max_hp for m in side_a.members)
         b_hp = sum(m.hp for m in side_b.alive_members)
@@ -550,7 +586,6 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
         lines.append(f"📊 {side_a.display_name}: {a_hp}/{a_max} HP ({side_a.alive_count} alive) | "
                      f"{side_b.display_name}: {b_hp}/{b_max} HP ({side_b.alive_count} alive)")
 
-        # Tick cooldowns
         for m in side_a.alive_members + side_b.alive_members:
             m.tick_cooldowns()
 
@@ -577,13 +612,17 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
         "winner_name": w_side.display_name,
         "loser_name": l_side.display_name,
         "turns": turns,
+        # Prop bet outcomes
+        "any_fled": any_fled,
+        "bleed_kills": bleed_kills,
+        "first_crit_side": first_crit_side,
+        "total_kos": total_kos,
+        # Fighter stats
         "fighter_a": {
-            "name": side_a.display_name,
-            "family": side_a.family,
+            "name": side_a.display_name, "family": side_a.family,
             "hp": sum(m.hp for m in side_a.alive_members),
             "max_hp": sum(m.max_hp for m in side_a.members),
-            "type": side_a.dtype,
-            "cw": side_a.cw,
+            "type": side_a.dtype, "cw": side_a.cw,
             "group_slots": get_group_slots(side_a.cw),
             "pack_size": side_a.pack_size,
             "alive_count": side_a.alive_count,
@@ -591,12 +630,10 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
             "passive": a_passive,
         },
         "fighter_b": {
-            "name": side_b.display_name,
-            "family": side_b.family,
+            "name": side_b.display_name, "family": side_b.family,
             "hp": sum(m.hp for m in side_b.alive_members),
             "max_hp": sum(m.max_hp for m in side_b.members),
-            "type": side_b.dtype,
-            "cw": side_b.cw,
+            "type": side_b.dtype, "cw": side_b.cw,
             "group_slots": get_group_slots(side_b.cw),
             "pack_size": side_b.pack_size,
             "alive_count": side_b.alive_count,
@@ -604,3 +641,5 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
             "passive": b_passive,
         },
     }
+
+
