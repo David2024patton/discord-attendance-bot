@@ -13,6 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy bot code
 COPY bot.py .
 COPY dashboard.py .
+COPY dinos.json .
+COPY scrape_wiki.py .
+COPY assets/ ./assets/
 
 # Create state directory and declare as volume for persistence
 RUN mkdir -p /app/data
