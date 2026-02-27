@@ -2032,16 +2032,16 @@ async def calendar_page(request):
             sessionDays.forEach(function(sd, idx) {
                 if (sd.weekday === i) {
                     const evType = sd.type || 'Session';
-                    const typeEmoji = {'Hunt':'\ud83e\uddb4','Nesting':'\ud83e\udd5a','Growth':'\ud83c\udf31','PvP':'\u2694\ufe0f','Migration':'\ud83c\udf0d'};
-                    const emoji = typeEmoji[evType] || '\ud83d\udcc5';
+                    const typeEmoji = {'Hunt':'\\ud83e\\uddb4','Nesting':'\\ud83e\\udd5a','Growth':'\\ud83c\\udf31','PvP':'\\u2694\\ufe0f','Migration':'\\ud83c\\udf0d'};
+                    const emoji = typeEmoji[evType] || '\\ud83d\\udcc5';
                     html += '<div class="k-card" draggable="true" ondragstart="handleDragStart(event, ' + idx + ')">';
                     html += '<div class="k-actions">';
-                    html += '<button class="k-act-btn" title="Edit" onclick="event.stopPropagation();openEditRecurring(event, '+idx+')">\u270f\ufe0f</button>';
-                    html += '<button class="k-act-btn" title="Duplicate" onclick="event.stopPropagation();duplicateRecurring('+idx+')">\ud83d\udccb</button>';
-                    html += '<button class="k-act-btn k-act-del" title="Delete" onclick="event.stopPropagation();deleteRecurring('+idx+')">\ud83d\uddd1\ufe0f</button>';
+                    html += '<button class="k-act-btn" title="Edit" onclick="event.stopPropagation();openEditRecurring(event, '+idx+')">\\u270f\\ufe0f</button>';
+                    html += '<button class="k-act-btn" title="Duplicate" onclick="event.stopPropagation();duplicateRecurring('+idx+')">\\ud83d\\udccb</button>';
+                    html += '<button class="k-act-btn k-act-del" title="Delete" onclick="event.stopPropagation();deleteRecurring('+idx+')">\\ud83d\\uddd1\\ufe0f</button>';
                     html += '</div>';
                     html += '<div class="k-title">' + emoji + ' ' + evType + '</div>';
-                    html += '<div class="k-time">\u23f0 ' + String(sd.hour).padStart(2,'0') + ':00</div>';
+                    html += '<div class="k-time">\\u23f0 ' + String(sd.hour).padStart(2,'0') + ':00</div>';
                     if (sd.name && sd.name !== evType) html += '<div class="k-subtitle">' + sd.name + '</div>';
                     html += '</div>';
                 }
