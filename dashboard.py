@@ -2398,7 +2398,10 @@ async def calendar_page(request):
     """.replace('__SESSION_DAYS__', session_days_json).replace('__CURRENT_SESSION__', current_session_json)
 
     content = html_part + js_part
-    return web.Response(text=_page("Calendar", content, "calendar"), content_type="text/html")
+    # Sanitize surrogate characters that can come from Discord user names/emoji
+    page_html = _page("Calendar", content, "calendar")
+    page_html = page_html.encode('utf-8', errors='replace').decode('utf-8')
+    return web.Response(text=page_html, content_type="text/html")
 
 
 # ── API Endpoints ────────────────────────────────────────────────
