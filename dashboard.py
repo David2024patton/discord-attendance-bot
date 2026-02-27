@@ -1193,17 +1193,14 @@ async def dino_profile_page(request):
 
         <!-- Actions -->
         <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap">
-            <button class="btn" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px" onclick="battleAgain()">⚔️ Battle Again</button>
             <button class="btn btn-primary" id="saveProfileBtn" onclick="saveProfile()">Save Changes</button>
             <button class="btn btn-danger" onclick="if(confirm('Delete {dino['name']}?')){{fetch('/api/delete-card',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{id:'{dino_id}'}})}}).then(()=>window.location='/battle')}}">Delete Profile</button>
         </div>
 
-        <!-- Battle Result Panel -->
-        <div id="battleResult" class="card" style="margin-top:20px;display:none;border-left:4px solid var(--accent)">
-            <div style="text-align:center;margin-bottom:16px">
-                <h3 id="battleTitle" style="margin:0;color:var(--text-bright);font-size:22px">⚔️ Battle Result</h3>
-            </div>
-            <div id="battleContent"></div>
+        <!-- Battle History (from Discord chat battles) -->
+        <div class="card" style="margin-top:20px">
+            <h3 style="margin-bottom:16px;font-weight:700;color:var(--text-bright)">⚔️ Battle History</h3>
+            <div id="battleHistory"><span style="color:var(--text-dim)">Loading battle history...</span></div>
         </div>
     </div>
 
@@ -1236,130 +1233,56 @@ async def dino_profile_page(request):
         btn.disabled = false;
     }}
 
-    async function battleAgain() {{
-        const panel = document.getElementById('battleResult');
-        const content = document.getElementById('battleContent');
-        const title = document.getElementById('battleTitle');
-        title.innerHTML = '⏳ Simulating battle...';
-        content.innerHTML = '';
-        panel.style.display = '';
+    // Load battle history from server
+    fetch('/api/dino-stats/{dino_id}').then(r => r.json()).then(stats => {{
+        const el = document.getElementById('battleHistory');
+        if (!stats.ok || !stats.data) {{
+            el.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:12px">No battles recorded yet. Start battling in Discord with <code>!dinobattle</code>!</div>';
+            return;
+        }}
+        const d = stats.data;
+        const t = d.total_battles || 0;
+        const wr = t > 0 ? Math.round((d.wins / t) * 100) : 0;
 
-        try {{
-            // Get a random opponent
-            const rDinos = await fetch('/api/dinos');
-            const allDinos = await rDinos.json();
-            const opponents = allDinos.filter(d => d.id !== '{dino_id}');
-            if (opponents.length === 0) {{ alert('No opponents available!'); return; }}
-            const opp = opponents[Math.floor(Math.random() * opponents.length)];
+        let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-bottom:16px">';
+        html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:20px;font-weight:800;color:var(--green)">' + (d.wins||0) + '</div><div style="font-size:11px;color:var(--text-dim)">Wins</div></div>';
+        html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:20px;font-weight:800;color:var(--red)">' + (d.losses||0) + '</div><div style="font-size:11px;color:var(--text-dim)">Losses</div></div>';
+        html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:20px;font-weight:800;color:var(--accent)">' + wr + '%</div><div style="font-size:11px;color:var(--text-dim)">Win Rate</div></div>';
+        html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:20px;font-weight:800;color:var(--text-bright)">💀 ' + (d.kills||0) + '</div><div style="font-size:11px;color:var(--text-dim)">Kills</div></div>';
+        html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:20px;font-weight:800;color:var(--text-dim)">☠️ ' + (d.deaths||0) + '</div><div style="font-size:11px;color:var(--text-dim)">Deaths</div></div>';
+        html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:20px;font-weight:800;color:var(--text-dim)">🏃 ' + (d.flees||0) + '</div><div style="font-size:11px;color:var(--text-dim)">Flees</div></div>';
+        html += '</div>';
 
-            // Run server-side battle simulation
-            const rBattle = await fetch('/api/battle', {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify({{ attacker_id: '{dino_id}', defender_id: opp.id }})
-            }});
-            const result = await rBattle.json();
-            if (!result.ok) {{ alert(result.error || 'Battle failed'); return; }}
-
-            const won = result.winner === 'a';
-            const fa = result.fighter_a;
-            const fb = result.fighter_b;
-
-            title.innerHTML = won
-                ? '<span style="color:var(--green)">⚔️ VICTORY!</span>'
-                : '<span style="color:var(--red)">⚔️ DEFEAT</span>';
-
-            // Fighter summary cards
-            const aCol = fa.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
-            const bCol = fb.type === 'carnivore' ? 'var(--red)' : 'var(--green)';
-            const aHpPct = Math.max(0, Math.round(fa.hp / fa.max_hp * 100));
-            const bHpPct = Math.max(0, Math.round(fb.hp / fb.max_hp * 100));
-
-            let html = '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:center;margin-bottom:20px">';
-
-            // Fighter A card
-            html += '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (won ? 'var(--green)' : 'var(--border)') + '">';
-            html += '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + fa.name + '</div>';
-            html += '<div style="font-size:11px;color:' + aCol + ';margin-bottom:4px">' + fa.type.toUpperCase() + ' &middot; ' + (fa.family || 'generic').toUpperCase() + '</div>';
-            html += '<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">CW ' + fa.cw + ' &middot; Slots: ' + fa.group_slots + '</div>';
-            html += '<div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden;margin-bottom:4px">';
-            html += '<div style="width:' + aHpPct + '%;height:100%;background:' + (aHpPct > 50 ? 'var(--green)' : (aHpPct > 25 ? '#f1c40f' : 'var(--red)')) + ';border-radius:6px"></div></div>';
-            html += '<div style="font-size:12px;font-weight:700;color:var(--text-bright)">' + fa.hp + ' / ' + fa.max_hp + ' HP</div>';
-            html += '</div>';
-
-            // VS
-            html += '<div style="font-size:28px;font-weight:800;color:var(--text-dim)">VS</div>';
-
-            // Fighter B card
-            html += '<div style="text-align:center;padding:16px;background:var(--bg3);border-radius:10px;border:2px solid ' + (!won ? 'var(--green)' : 'var(--border)') + '">';
-            html += '<div style="font-weight:800;font-size:18px;color:var(--text-bright)">' + fb.name + '</div>';
-            html += '<div style="font-size:11px;color:' + bCol + ';margin-bottom:4px">' + fb.type.toUpperCase() + ' &middot; ' + (fb.family || 'generic').toUpperCase() + '</div>';
-            html += '<div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">CW ' + fb.cw + ' &middot; Slots: ' + fb.group_slots + '</div>';
-            html += '<div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden;margin-bottom:4px">';
-            html += '<div style="width:' + bHpPct + '%;height:100%;background:' + (bHpPct > 50 ? 'var(--green)' : (bHpPct > 25 ? '#f1c40f' : 'var(--red)')) + ';border-radius:6px"></div></div>';
-            html += '<div style="font-size:12px;font-weight:700;color:var(--text-bright)">' + fb.hp + ' / ' + fb.max_hp + ' HP</div>';
-            html += '</div></div>';
-
-            // Round-by-round combat log
-            html += '<div style="background:var(--bg);border-radius:10px;padding:16px;max-height:400px;overflow-y:auto;font-family:monospace;font-size:13px;line-height:1.8">';
-            result.rounds.forEach(function(roundText) {{
-                // Bold round headers
-                let formatted = roundText
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                    .replace(/⚔️/g, '<span style="font-size:16px">⚔️</span>')
-                    .replace(/💀/g, '<span style="font-size:16px">💀</span>')
-                    .replace(/🩸/g, '<span style="color:var(--red)">🩸</span>')
-                    .replace(/🦴/g, '<span style="color:#f1c40f">🦴</span>')
-                    .replace(/🛡️/g, '<span style="color:var(--accent)">🛡️</span>')
-                    .replace(/💚/g, '<span style="color:var(--green)">💚</span>')
-                    .replace(/📊/g, '<span style="color:var(--accent)">📊</span>');
-                html += '<div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">' + formatted.replace(/\\n/g, '<br>') + '</div>';
-            }});
-            html += '</div>';
-
-            // Battle stats summary
-            const totalKOs = (result.total_kos || 0);
-            const anyFled = result.any_fled || false;
-            const bleedKills = result.bleed_kills || 0;
-
-            html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px">';
-            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:var(--text-bright)">' + (result.rounds || []).length + '</div><div style="font-size:11px;color:var(--text-dim)">Rounds</div></div>';
-            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:var(--red)">💀 ' + totalKOs + '</div><div style="font-size:11px;color:var(--text-dim)">KOs</div></div>';
-            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:' + (anyFled ? 'var(--green)' : 'var(--text-dim)') + '">' + (anyFled ? '🏃 Yes' : '—') + '</div><div style="font-size:11px;color:var(--text-dim)">Fled</div></div>';
-            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:' + (bleedKills > 0 ? 'var(--red)' : 'var(--text-dim)') + '">' + (bleedKills > 0 ? '🩸 ' + bleedKills : '—') + '</div><div style="font-size:11px;color:var(--text-dim)">Bleed Kills</div></div>';
-            html += '</div>';
-
-            // Abilities used (compact pills)
-            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">';
-            [fa, fb].forEach(function(f) {{
-                html += '<div style="background:var(--bg3);border-radius:8px;padding:12px">';
-                html += '<div style="font-weight:700;font-size:12px;margin-bottom:6px;color:var(--text-bright)">' + f.name + '</div>';
-                const abilities = f.abilities_used || {{}};
-                if (Object.keys(abilities).length === 0) {{
-                    html += '<span style="font-size:11px;color:var(--text-dim)">No abilities used</span>';
-                }} else {{
-                    html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
-                    Object.entries(abilities).forEach(function(entry) {{
-                        html += '<span style="font-size:11px;padding:2px 8px;background:var(--bg);border-radius:12px;color:var(--text-dim)">' + entry[0] + ' <strong style="color:var(--text-bright)">' + entry[1] + 'x</strong></span>';
-                    }});
-                    html += '</div>';
+        // Battle log
+        const log = d.battle_log || [];
+        if (log.length > 0) {{
+            html += '<div style="font-weight:700;font-size:13px;color:var(--text-bright);margin-bottom:8px">Recent Battles (' + log.length + ')</div>';
+            html += '<div style="max-height:300px;overflow-y:auto">';
+            log.slice().reverse().forEach(function(entry) {{
+                const isWin = entry.result === 'win';
+                const isTie = entry.result === 'tie';
+                const color = isWin ? 'var(--green)' : (isTie ? '#f1c40f' : 'var(--red)');
+                const icon = isWin ? '✅' : (isTie ? '🤝' : '❌');
+                const ts = entry.timestamp ? new Date(entry.timestamp).toLocaleDateString() : '';
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px">';
+                html += '<span>' + icon + '</span>';
+                html += '<span style="color:' + color + ';font-weight:600;text-transform:uppercase">' + entry.result + '</span>';
+                html += '<span style="color:var(--text-dim)">vs</span>';
+                html += '<span style="color:var(--text-bright);font-weight:600">' + entry.vs + '</span>';
+                if (entry.hp_left != null && entry.hp_max) {{
+                    html += '<span style="color:var(--text-dim);margin-left:auto">' + Math.max(0,entry.hp_left) + '/' + entry.hp_max + ' HP</span>';
                 }}
+                if (ts) html += '<span style="color:var(--text-dim);font-size:11px">' + ts + '</span>';
                 html += '</div>';
             }});
             html += '</div>';
-
-            // Battle Again button
-            html += '<div style="text-align:center;margin-top:16px">';
-            html += '<button class="btn" onclick="battleAgain()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px;border-radius:8px">⚔️ Battle Again</button>';
-            html += '</div>';
-
-            content.innerHTML = html;
-            panel.scrollIntoView({{ behavior: 'smooth', block: 'nearest' }});
-        }} catch(err) {{
-            title.innerHTML = '<span style="color:var(--red)">Battle Error</span>';
-            content.innerHTML = '<div style="color:var(--red);padding:16px">' + err + '</div>';
+        }} else {{
+            html += '<div style="color:var(--text-dim);font-size:13px">No battle log yet.</div>';
         }}
-    }}
+        el.innerHTML = html;
+    }}).catch(() => {{
+        document.getElementById('battleHistory').innerHTML = '<div style="color:var(--text-dim)">No battles recorded yet.</div>';
+    }});
     </script>
     """
 
@@ -3273,6 +3196,21 @@ async def api_dinos(request):
     load_dinos = _state_getters.get("load_dinos")
     dinos = load_dinos() if load_dinos else []
     return web.json_response(dinos)
+
+@routes.get("/api/dino-stats/{dino_id}")
+async def api_dino_stats(request):
+    """Return battle stats for a specific dino."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    dino_id = request.match_info["dino_id"]
+    load_stats = _state_getters.get("load_dino_stats")
+    if not load_stats:
+        return web.json_response({"ok": False, "error": "Stats loader not available"})
+    stats = load_stats()
+    dino_stats = stats.get(dino_id)
+    if not dino_stats:
+        return web.json_response({"ok": False})
+    return web.json_response({"ok": True, "data": dino_stats})
 
 @routes.post("/api/battle")
 async def api_battle(request):

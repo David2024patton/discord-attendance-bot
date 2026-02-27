@@ -3731,6 +3731,7 @@ async def on_ready():
         "load_dinos":         load_dinos,
         "save_dinos":         save_dinos,
         "load_dino_lb":       load_dino_lb,
+        "load_dino_stats":    load_dino_stats,
         "create_schedule":    create_schedule,
         "edit_current_session": edit_current_session,
     })
