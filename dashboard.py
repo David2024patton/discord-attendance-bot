@@ -398,17 +398,32 @@ def _page(title, content, active="home"):
 LOGIN_PAGE = f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Login — Oath Bot</title>
+<title>Oath Discord Bot</title>
 <style>{CSS}</style>
+<style>
+.login-wrap {{ background: radial-gradient(ellipse at 50% 20%, rgba(88,101,242,0.08) 0%, transparent 60%); }}
+.login-container {{ display:flex; flex-direction:column; align-items:center; gap:0; max-width:420px; width:90%; }}
+.splash-banner {{ width:100%; border-radius:16px 16px 0 0; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,0.4); }}
+.splash-banner img {{ width:100%; height:auto; display:block; }}
+.login-box {{ border-radius:0 0 16px 16px !important; border-top:none !important; width:100% !important; box-sizing:border-box; box-shadow:0 12px 40px rgba(0,0,0,0.4); }}
+.login-box h2 {{ background:linear-gradient(135deg, var(--accent), #8b5cf6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:22px; letter-spacing:-0.3px; }}
+.login-box p.subtitle {{ color:var(--text-dim); font-size:12px; margin:-16px 0 20px; }}
+</style>
 </head><body>
 <div class="login-wrap">
-    <div class="login-box">
-        <h2>❖ Oath Scheduler</h2>
-        <div class="login-error" id="err">Invalid credentials</div>
-        <form method="POST" action="/login">
-            <input type="password" name="password" placeholder="Administrator Password" autofocus required>
-            <button type="submit" class="btn btn-primary" style="letter-spacing:0.5px">AUTHENTICATE</button>
-        </form>
+    <div class="login-container">
+        <div class="splash-banner">
+            <img src="/assets/pot_splash.png" alt="Path of Titans">
+        </div>
+        <div class="login-box">
+            <h2>⚔️ Oath Discord Bot</h2>
+            <p class="subtitle">Path of Titans — Battle Administration</p>
+            <div class="login-error" id="err">Invalid credentials</div>
+            <form method="POST" action="/login">
+                <input type="password" name="password" placeholder="Administrator Password" autofocus required>
+                <button type="submit" class="btn btn-primary" style="letter-spacing:0.5px;background:linear-gradient(135deg,var(--accent),#8b5cf6);border:none">AUTHENTICATE</button>
+            </form>
+        </div>
     </div>
 </div>
 </body></html>"""
