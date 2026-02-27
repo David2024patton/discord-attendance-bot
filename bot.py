@@ -3257,26 +3257,14 @@ async def dinobattle(ctx):
     for child in view.children:
         child.disabled = True
     
-    # ----------------------------------------------------
-    # Stage 2: Battle In Progress Animation
-    # ----------------------------------------------------
-    anim_path = os.path.join(os.path.dirname(__file__), "assets", "dino_claws.png")
-    if os.path.exists(anim_path):
-        anim_file = discord.File(anim_path, filename="claws.png")
-        embed.title = "⚔️ BATTLE IN PROGRESS... ⚔️"
-        embed.description = "The beasts are clashing! Who will emerge victorious?"
-        embed.color = 0xe74c3c
-        embed.set_image(url="attachment://claws.png")
-        try:
-            await msg.edit(embed=embed, view=view, attachments=[anim_file])
-        except:
-             await msg.edit(embed=embed, view=view)
-    else:
-        embed.title = "⚔️ BATTLE IN PROGRESS... ⚔️"
-        embed.description = "The beasts are clashing! Who will emerge victorious?"
-        embed.color = 0xe74c3c
-        embed.set_image(url="")
+    # Update embed to show betting closed — keep VS card image visible
+    embed.title = "⚔️ BETTING CLOSED — FIGHT STARTING!"
+    embed.description = f"**{dino_a['name']}** vs **{dino_b['name']}**\n\nAll bets are locked in!"
+    embed.color = 0xe74c3c
+    try:
         await msg.edit(embed=embed, view=view)
+    except:
+        pass
 
     await asyncio.sleep(5)
     
