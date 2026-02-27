@@ -1260,20 +1260,39 @@ def _render_vs_image(dino_a, dino_b):
             except Exception:
                 pass
 
-        # Name
+        # Name — split parenthetical mod info to subtitle
+        import re as _re
+        full_name = dino['name']
+        m = _re.match(r'^(.+?)\s*\((.+)\)$', full_name)
+        if m:
+            base_name = m.group(1).strip()
+            subtitle = f"({m.group(2).strip()})"
+        else:
+            base_name = full_name
+            subtitle = None
+
         font_name = font_large
-        name_bbox = draw.textbbox((0, 0), dino['name'], font=font_name)
+        name_bbox = draw.textbbox((0, 0), base_name, font=font_name)
         if (name_bbox[2] - name_bbox[0]) > CARD_WIDTH - 20:
             try:
                 font_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
-                name_bbox = draw.textbbox((0, 0), dino['name'], font=font_name)
+                name_bbox = draw.textbbox((0, 0), base_name, font=font_name)
             except OSError:
                 pass
         name_x = x_offset + (CARD_WIDTH - (name_bbox[2] - name_bbox[0])) // 2
-        # Use simple stroke by drawing text 4 times slightly offset
-        draw.text((name_x-1, PADDING + 14), dino['name'], fill=(0,0,0), font=font_name)
-        draw.text((name_x+1, PADDING + 16), dino['name'], fill=(0,0,0), font=font_name)
-        draw.text((name_x, PADDING + 15), dino['name'], fill=TEXT_COLOR, font=font_name)
+        # Stroke for legibility
+        draw.text((name_x-1, PADDING + 14), base_name, fill=(0,0,0), font=font_name)
+        draw.text((name_x+1, PADDING + 16), base_name, fill=(0,0,0), font=font_name)
+        draw.text((name_x, PADDING + 15), base_name, fill=TEXT_COLOR, font=font_name)
+
+        if subtitle:
+            try:
+                font_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+            except OSError:
+                font_sub = font_med
+            sub_bbox = draw.textbbox((0, 0), subtitle, font=font_sub)
+            sub_x = x_offset + (CARD_WIDTH - (sub_bbox[2] - sub_bbox[0])) // 2
+            draw.text((sub_x, PADDING + 40), subtitle, fill=(180, 180, 180), font=font_sub)
 
         # Stats Table
         stats_y = PADDING + 270
@@ -2706,16 +2725,16 @@ class DinoBattleView(discord.ui.View):
         if not lb:
             await interaction.response.send_message("No Dino Battle bets on record yet!", ephemeral=True)
             return
-        embed = await _build_dino_lb_embed(interaction.client, lb)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed, file = await _build_dino_lb_embed(interaction.client, lb)
+        await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
 
     async def dino_lb_callback(self, interaction: discord.Interaction):
         stats = load_dino_stats()
         if not stats:
             await interaction.response.send_message("No dino battles recorded yet!", ephemeral=True)
             return
-        embed = _build_dino_stats_embed(stats)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed, file = _build_dino_stats_embed(stats)
+        await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
 
     async def menu_callback(self, interaction: discord.Interaction):
         is_admin = False
@@ -2743,8 +2762,8 @@ class DinoPostBattleView(discord.ui.View):
         if not lb:
             await interaction.response.send_message("No Dino Battle bets on record yet!", ephemeral=True)
             return
-        embed = await _build_dino_lb_embed(interaction.client, lb)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed, file = await _build_dino_lb_embed(interaction.client, lb)
+        await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
 
     async def menu_callback(self, interaction: discord.Interaction):
         view = HelpView(interaction.user.id, show_admin=False)
@@ -2827,107 +2846,262 @@ def _check_award_champion(lb):
 
 
 async def _build_dino_lb_embed(client, lb):
-    """Build an enhanced leaderboard embed with weekly champion pinned."""
+    """Build an enhanced leaderboard as an image, matching attendance LB style."""
     week = _get_week_key()
-    
-    # Check for previous week champion
     champion_uid = _check_award_champion(lb)
     save_dino_lb(lb)
 
-    # Find current week's leader
-    weekly_leader_uid = None
-    weekly_leader_wins = 0
-    for uid, entry in lb.items():
-        _ensure_lb_fields(entry)
-        wk = entry.get("weekly", {}).get(week, {})
-        w = wk.get("wins", 0)
-        if w > weekly_leader_wins:
-            weekly_leader_wins = w
-            weekly_leader_uid = uid
-
     sorted_lb = sorted(lb.items(), key=lambda x: x[1].get('wins', 0), reverse=True)
-    desc_lines = []
-
-    # Pin weekly leader at top
-    if weekly_leader_uid and weekly_leader_wins > 0:
-        try:
-            user = await client.fetch_user(int(weekly_leader_uid))
-            wl_name = user.display_name if user else f"User {weekly_leader_uid}"
-        except:
-            wl_name = f"User {weekly_leader_uid}"
-        stars = lb[weekly_leader_uid].get("champion_stars", 0)
-        star_txt = f" ⭐ x{stars}" if stars > 0 else ""
-        desc_lines.append(f"👑 **WEEKLY LEADER**: **{wl_name}** — {weekly_leader_wins} wins this week{star_txt}")
-        desc_lines.append("─" * 30)
-
-    for rank, (uid_str, stats) in enumerate(sorted_lb[:15]):
+    
+    # Resolve names
+    entries = []
+    for uid_str, stats in sorted_lb[:15]:
         _ensure_lb_fields(stats)
         try:
             user = await client.fetch_user(int(uid_str))
             name = user.display_name if user else f"User {uid_str}"
         except:
             name = f"User {uid_str}"
-
-        w, l, t = stats['wins'], stats['losses'], stats['ties']
-        s, bs = stats.get('streak', 0), stats.get('best_streak', 0)
-        pw, pl = stats.get('prop_wins', 0), stats.get('prop_losses', 0)
-        stars = stats.get('champion_stars', 0)
-        star_txt = f" ⭐x{stars}" if stars > 0 else ""
-
-        # Weekly stats
         wk = stats.get("weekly", {}).get(week, {})
-        wk_w = wk.get("wins", 0)
-        wk_pw = wk.get("prop_wins", 0)
+        entries.append((uid_str, name, stats, wk))
 
-        line = f"**#{rank+1}** {name}{star_txt}\n"
-        line += f"  {w}W / {l}L / {t}T | 🔥{s} (Best: {bs})\n"
-        line += f"  Props: {pw}W/{pl}L | This week: {wk_w}W, {wk_pw} props"
-        desc_lines.append(line)
-
-    embed = discord.Embed(
-        title="🦖 Oath Bot — Battle Leaderboard 🦕",
-        description="\n".join(desc_lines) if desc_lines else "No bets yet!",
-        color=0xf1c40f
-    )
+    buf = _render_battle_lb_image(entries, week)
+    file = discord.File(buf, filename="battle_lb.png")
+    embed = discord.Embed(title="🦖 Battle Leaderboard 🦕", color=0xf1c40f)
+    embed.set_image(url="attachment://battle_lb.png")
     embed.set_footer(text=f"Week: {week} • ⭐ = Weekly Champion titles")
-    return embed
+    return embed, file
+
+def _render_battle_lb_image(entries, week):
+    """Render battle leaderboard as a table image."""
+    BG_COLOR = (30, 33, 36)
+    HEADER_COLOR = (180, 130, 20)
+    ROW_EVEN = (44, 47, 51)
+    ROW_ODD = (54, 57, 63)
+    TEXT_COLOR = (255, 255, 255)
+    DIM_TEXT = (185, 187, 190)
+    GREEN = (67, 181, 129)
+    RED = (240, 71, 71)
+    ORANGE = (255, 165, 0)
+    GOLD = (255, 215, 0)
+    
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+        font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+        header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 13)
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+    except OSError:
+        font = ImageFont.load_default()
+        font_bold = font
+        header_font = font
+        title_font = font
+
+    col_widths = [45, 170, 50, 45, 45, 55, 65, 55]
+    col_headers = ["Rank", "Name", "W", "L", "T", "Streak", "Props", "Week"]
+    row_height = 28
+    padding = 10
+    title_height = 40
+    header_height = 26
+    table_width = sum(col_widths) + padding * 2
+    num_rows = max(1, len(entries))
+    table_height = title_height + header_height + row_height * num_rows + padding
+
+    img = Image.new("RGB", (table_width, table_height), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    draw.rectangle([(0, 0), (4, title_height)], fill=HEADER_COLOR)
+    draw.text((padding + 6, 8), "Battle Leaderboard", fill=TEXT_COLOR, font=title_font)
+
+    y = title_height
+    draw.rectangle([(0, y), (table_width, y + header_height)], fill=HEADER_COLOR)
+    x = padding
+    for i, header in enumerate(col_headers):
+        draw.text((x + 3, y + 5), header, fill=TEXT_COLOR, font=header_font)
+        x += col_widths[i]
+
+    y += header_height
+    medal_colors = [GOLD, (192,192,192), (205,127,50)]
+    
+    for idx, (uid_str, name, stats, wk) in enumerate(entries):
+        row_color = ROW_EVEN if idx % 2 == 0 else ROW_ODD
+        draw.rectangle([(0, y), (table_width, y + row_height)], fill=row_color)
+
+        x = padding
+        # Rank
+        if idx < 3:
+            rc = medal_colors[idx]
+            draw.text((x + 3, y + 5), f"#{idx+1}", fill=rc, font=font_bold)
+        else:
+            draw.text((x + 3, y + 5), f"#{idx+1}", fill=DIM_TEXT, font=font)
+        x += col_widths[0]
+
+        # Name + stars
+        stars = stats.get('champion_stars', 0)
+        disp = name[:16] + ".." if len(name) > 16 else name
+        if stars > 0:
+            disp += f" ★{stars}"
+        draw.text((x + 3, y + 5), disp, fill=TEXT_COLOR, font=font)
+        x += col_widths[1]
+
+        # W
+        draw.text((x + 3, y + 5), str(stats['wins']), fill=GREEN, font=font_bold)
+        x += col_widths[2]
+
+        # L
+        lc = RED if stats['losses'] > 0 else DIM_TEXT
+        draw.text((x + 3, y + 5), str(stats['losses']), fill=lc, font=font)
+        x += col_widths[3]
+
+        # T
+        draw.text((x + 3, y + 5), str(stats.get('ties', 0)), fill=DIM_TEXT, font=font)
+        x += col_widths[4]
+
+        # Streak
+        s = stats.get('streak', 0)
+        bs = stats.get('best_streak', 0)
+        stxt = f"🔥{s}" if s >= 2 else str(s)
+        sc = ORANGE if s >= 3 else (GREEN if s > 0 else DIM_TEXT)
+        draw.text((x + 3, y + 5), stxt, fill=sc, font=font)
+        x += col_widths[5]
+
+        # Props
+        pw, pl = stats.get('prop_wins', 0), stats.get('prop_losses', 0)
+        draw.text((x + 3, y + 5), f"{pw}W/{pl}L", fill=DIM_TEXT, font=font)
+        x += col_widths[6]
+
+        # Week
+        wk_w = wk.get("wins", 0)
+        draw.text((x + 3, y + 5), str(wk_w), fill=GREEN if wk_w > 0 else DIM_TEXT, font=font)
+
+        y += row_height
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 
 def _build_dino_stats_embed(stats):
-    """Build a dino leaderboard showing species battle records."""
-    # Sort by wins descending, then by win rate
+    """Build a dino leaderboard as an image table."""
     sorted_dinos = sorted(
         stats.items(),
         key=lambda x: (x[1].get('wins', 0), x[1].get('wins', 0) / max(1, x[1].get('total_battles', 1))),
         reverse=True
     )
-    
-    desc_lines = []
-    medal = ['🥇', '🥈', '🥉']
-    for i, (did, ds) in enumerate(sorted_dinos[:15]):
+
+    buf = _render_dino_stats_image(sorted_dinos[:15])
+    file = discord.File(buf, filename="dino_stats.png")
+    embed = discord.Embed(title="🦕 Dino Battle Leaderboard 🦖", color=0x2ecc71)
+    embed.set_image(url="attachment://dino_stats.png")
+    embed.set_footer(text="Species ranked by wins • 🔴 Carnivore 🟢 Herbivore")
+    return embed, file
+
+def _render_dino_stats_image(sorted_dinos):
+    """Render dino species leaderboard as a table image."""
+    BG_COLOR = (30, 33, 36)
+    HEADER_COLOR = (46, 204, 113)
+    ROW_EVEN = (44, 47, 51)
+    ROW_ODD = (54, 57, 63)
+    TEXT_COLOR = (255, 255, 255)
+    DIM_TEXT = (185, 187, 190)
+    GREEN = (67, 181, 129)
+    RED = (240, 71, 71)
+    GOLD = (255, 215, 0)
+
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+        font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+        header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 13)
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+    except OSError:
+        font = ImageFont.load_default()
+        font_bold = font
+        header_font = font
+        title_font = font
+
+    col_widths = [45, 180, 50, 45, 45, 55, 55, 55]
+    col_headers = ["Rank", "Dinosaur", "W", "L", "WR%", "Kills", "Deaths", "Flees"]
+    row_height = 28
+    padding = 10
+    title_height = 40
+    header_height = 26
+    table_width = sum(col_widths) + padding * 2
+    num_rows = max(1, len(sorted_dinos))
+    table_height = title_height + header_height + row_height * num_rows + padding
+
+    img = Image.new("RGB", (table_width, table_height), BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    draw.rectangle([(0, 0), (4, title_height)], fill=HEADER_COLOR)
+    draw.text((padding + 6, 8), "Dino Leaderboard", fill=TEXT_COLOR, font=title_font)
+
+    y = title_height
+    draw.rectangle([(0, y), (table_width, y + header_height)], fill=HEADER_COLOR)
+    x = padding
+    for i, header in enumerate(col_headers):
+        draw.text((x + 3, y + 5), header, fill=TEXT_COLOR, font=header_font)
+        x += col_widths[i]
+
+    y += header_height
+    medal_colors = [GOLD, (192,192,192), (205,127,50)]
+
+    for idx, (did, ds) in enumerate(sorted_dinos):
+        row_color = ROW_EVEN if idx % 2 == 0 else ROW_ODD
+        draw.rectangle([(0, y), (table_width, y + row_height)], fill=row_color)
+
+        x = padding
+        # Rank
+        if idx < 3:
+            draw.text((x + 3, y + 5), f"#{idx+1}", fill=medal_colors[idx], font=font_bold)
+        else:
+            draw.text((x + 3, y + 5), f"#{idx+1}", fill=DIM_TEXT, font=font)
+        x += col_widths[0]
+
+        # Dinosaur name
         name = ds.get('name', did)
         dtype = ds.get('type', 'unknown')
+        type_dot = "● " if dtype == 'carnivore' else "● "
+        type_color = RED if dtype == 'carnivore' else GREEN
+        # Draw type dot then name
+        draw.text((x + 3, y + 5), "●", fill=type_color, font=font)
+        disp_name = name[:17] + ".." if len(name) > 17 else name
+        draw.text((x + 16, y + 5), disp_name, fill=TEXT_COLOR, font=font)
+        x += col_widths[1]
+
+        # W
         w = ds.get('wins', 0)
+        draw.text((x + 3, y + 5), str(w), fill=GREEN, font=font_bold)
+        x += col_widths[2]
+
+        # L
         l = ds.get('losses', 0)
+        draw.text((x + 3, y + 5), str(l), fill=RED if l > 0 else DIM_TEXT, font=font)
+        x += col_widths[3]
+
+        # WR%
         t = ds.get('total_battles', 0)
-        k = ds.get('kills', 0)
-        d = ds.get('deaths', 0)
-        f = ds.get('flees', 0)
         wr = int((w / max(1, t)) * 100)
-        icon = medal[i] if i < 3 else f'**#{i+1}**'
-        type_emoji = '🔴' if dtype == 'carnivore' else '🟢'
-        
-        line = f"{icon} {type_emoji} **{name}** — {wr}% WR\n"
-        line += f"  {w}W/{l}L ({t} battles) | 💀{k} kills | ☠️{d} deaths | 🏃{f} flees"
-        desc_lines.append(line)
-    
-    embed = discord.Embed(
-        title="🦕 Dino Battle Leaderboard 🦖",
-        description="\n".join(desc_lines) if desc_lines else "No dino battles recorded yet!",
-        color=0x2ecc71
-    )
-    embed.set_footer(text="Species ranked by total wins • 🔴 Carnivore 🟢 Herbivore")
-    return embed
+        wr_color = GREEN if wr >= 60 else (GOLD if wr >= 40 else RED)
+        draw.text((x + 3, y + 5), f"{wr}%", fill=wr_color, font=font)
+        x += col_widths[4]
+
+        # Kills
+        draw.text((x + 3, y + 5), str(ds.get('kills', 0)), fill=TEXT_COLOR, font=font)
+        x += col_widths[5]
+
+        # Deaths
+        draw.text((x + 3, y + 5), str(ds.get('deaths', 0)), fill=DIM_TEXT, font=font)
+        x += col_widths[6]
+
+        # Flees
+        draw.text((x + 3, y + 5), str(ds.get('flees', 0)), fill=DIM_TEXT, font=font)
+
+        y += row_height
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 
 @bot.command(help="Start a dinosaur battle! Users have 60s to bet.")
