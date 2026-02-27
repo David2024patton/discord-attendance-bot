@@ -469,6 +469,11 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
                 total_kos += 1
 
         if not side_a.alive or not side_b.alive:
+            a_hp = sum(max(0, m.hp) for m in side_a.members)
+            a_max = sum(m.max_hp for m in side_a.members)
+            b_hp = sum(max(0, m.hp) for m in side_b.members)
+            b_max = sum(m.max_hp for m in side_b.members)
+            hp_snapshots.append({"a_hp": a_hp, "a_max": a_max, "b_hp": b_hp, "b_max": b_max})
             turns.append(lines)
             break
 
@@ -483,6 +488,11 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
                 lines.append(f"💨 {side_a.display_name}'s remaining fighters have fled or fallen!")
             if not side_b.alive:
                 lines.append(f"💨 {side_b.display_name}'s remaining fighters have fled or fallen!")
+            a_hp = sum(max(0, m.hp) for m in side_a.members)
+            a_max = sum(m.max_hp for m in side_a.members)
+            b_hp = sum(max(0, m.hp) for m in side_b.members)
+            b_max = sum(m.max_hp for m in side_b.members)
+            hp_snapshots.append({"a_hp": a_hp, "a_max": a_max, "b_hp": b_hp, "b_max": b_max})
             turns.append(lines)
             break
 
@@ -586,13 +596,18 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
                             apply_effects(ea, em, et, lines)
 
         if not side_a.alive or not side_b.alive:
+            a_hp = sum(max(0, m.hp) for m in side_a.members)
+            a_max = sum(m.max_hp for m in side_a.members)
+            b_hp = sum(max(0, m.hp) for m in side_b.members)
+            b_max = sum(m.max_hp for m in side_b.members)
+            hp_snapshots.append({"a_hp": a_hp, "a_max": a_max, "b_hp": b_hp, "b_max": b_max})
             turns.append(lines)
             break
 
         # Turn summary
-        a_hp = sum(m.hp for m in side_a.alive_members)
+        a_hp = sum(max(0, m.hp) for m in side_a.members)
         a_max = sum(m.max_hp for m in side_a.members)
-        b_hp = sum(m.hp for m in side_b.alive_members)
+        b_hp = sum(max(0, m.hp) for m in side_b.members)
         b_max = sum(m.max_hp for m in side_b.members)
         lines.append(f"📊 {side_a.display_name}: {a_hp}/{a_max} HP ({side_a.alive_count} alive) | "
                      f"{side_b.display_name}: {b_hp}/{b_max} HP ({side_b.alive_count} alive)")
@@ -633,7 +648,7 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
         # Fighter stats
         "fighter_a": {
             "name": side_a.display_name, "family": side_a.family,
-            "hp": sum(m.hp for m in side_a.alive_members),
+            "hp": sum(max(0, m.hp) for m in side_a.members),
             "max_hp": sum(m.max_hp for m in side_a.members),
             "type": side_a.dtype, "cw": side_a.cw,
             "group_slots": get_group_slots(side_a.cw),
@@ -644,7 +659,7 @@ def simulate_battle(dino_a_data, dino_b_data, pack_a=1, pack_b=1, max_turns=15):
         },
         "fighter_b": {
             "name": side_b.display_name, "family": side_b.family,
-            "hp": sum(m.hp for m in side_b.alive_members),
+            "hp": sum(max(0, m.hp) for m in side_b.members),
             "max_hp": sum(m.max_hp for m in side_b.members),
             "type": side_b.dtype, "cw": side_b.cw,
             "group_slots": get_group_slots(side_b.cw),
