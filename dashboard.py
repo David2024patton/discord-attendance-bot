@@ -1128,46 +1128,22 @@ async def dino_profile_page(request):
 
     # Build abilities & traits info from battle engine data
     import battle_engine as _be
+    import json as _json
 
     dino_family = _be.SPECIES_FAMILIES.get(dino_id.lower(), "generic")
     family_label = dino_family.replace("_", " ").title()
     cw_val = dino.get('cw', 3000)
     group_slots = _be.get_group_slots(cw_val)
     passive = _be.PASSIVES.get(dino_family)
-    abilities = _be.get_ability_pool(dino_family, dino['type'], 100)  # base_atk=100 for display multipliers
 
-    # Effect badges HTML
-    def _effect_badge(eff):
-        t = eff.get("type", "")
-        if t == "bleed":
-            return f'<span style="background:rgba(231,76,60,0.2);color:#e74c3c;padding:2px 8px;border-radius:4px;font-size:11px">🩸 Bleed {eff.get("dur",0)}t</span>'
-        elif t == "bonebreak":
-            return f'<span style="background:rgba(241,196,15,0.2);color:#f1c40f;padding:2px 8px;border-radius:4px;font-size:11px">🦴 Bonebreak {eff.get("dur",0)}t</span>'
-        elif t == "defense":
-            return f'<span style="background:rgba(52,152,219,0.2);color:#3498db;padding:2px 8px;border-radius:4px;font-size:11px">🛡️ Defense +{int(eff.get("reduction",0)*100)}%</span>'
-        elif t == "heal":
-            return f'<span style="background:rgba(46,204,113,0.2);color:#2ecc71;padding:2px 8px;border-radius:4px;font-size:11px">💚 Heal {int(eff.get("pct",0)*100)}%</span>'
-        return ""
+    # Use custom abilities if stored, otherwise generate from family pool
+    if dino.get('custom_abilities'):
+        abilities = dino['custom_abilities']
+    else:
+        abilities = _be.get_ability_pool(dino_family, dino['type'], 100)
 
-    abilities_html = ""
-    for ab in abilities:
-        # Calculate damage multiplier relative to base
-        if ab["base"] > 0:
-            mult = ab["base"] / 100.0
-            dmg_text = f'<span style="color:#e74c3c;font-weight:600">{mult:.1f}x ATK</span>'
-        else:
-            dmg_text = '<span style="color:#3498db;font-weight:600">Utility</span>'
-        cd_text = f'<span style="color:var(--text-dim);font-size:12px">{ab["cd"]}t CD</span>' if ab["cd"] > 0 else '<span style="color:#2ecc71;font-size:12px">No CD</span>'
-        effects_html = " ".join(_effect_badge(e) for e in ab.get("effects", []))
-        abilities_html += f"""
-        <div style="padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                <span style="font-weight:700;color:var(--text-bright);font-size:15px">⚔️ {ab['name']}</span>
-                <div style="display:flex;gap:8px;align-items:center">{dmg_text} {cd_text}</div>
-            </div>
-            <div style="color:var(--text-dim);font-size:13px;font-style:italic;margin-bottom:4px">{ab['desc']}</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">{effects_html}</div>
-        </div>"""
+    # Serialize abilities to JSON for JS
+    abilities_json = _json.dumps(abilities).replace("'", "\\'")
 
     # Passive HTML
     passive_html = ""
@@ -1180,7 +1156,10 @@ async def dino_profile_page(request):
 
     traits_html = f"""
         <div class="card" style="margin-top:20px">
-            <h3 style="margin-bottom:16px;font-weight:700;color:var(--text-bright)">Abilities & Traits</h3>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h3 style="margin:0;font-weight:700;color:var(--text-bright)">Abilities & Traits</h3>
+                <button onclick="addAbility()" class="btn btn-primary" style="font-size:12px;padding:6px 14px">+ Add Ability</button>
+            </div>
             <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
                 <div style="padding:8px 14px;background:var(--bg);border-radius:8px;font-size:13px">
                     <span style="color:var(--text-dim)">Family:</span> <span style="color:var(--text-bright);font-weight:600">{family_label}</span>
@@ -1193,8 +1172,7 @@ async def dino_profile_page(request):
                 </div>
             </div>
             {passive_html}
-            <div style="display:flex;flex-direction:column;gap:10px">
-                {abilities_html}
+            <div id="abilitiesList" style="display:flex;flex-direction:column;gap:10px">
             </div>
         </div>"""
 
@@ -1254,6 +1232,129 @@ async def dino_profile_page(request):
     </div>
 
     <script>
+    let dinoAbilities = {abilities_json};
+
+    function renderAbilities() {{
+        const list = document.getElementById('abilitiesList');
+        list.innerHTML = '';
+        dinoAbilities.forEach((ab, idx) => {{
+            const mult = ab.base > 0 ? (ab.base / 100).toFixed(1) + 'x ATK' : 'Utility';
+            const multColor = ab.base > 0 ? '#e74c3c' : '#3498db';
+            const cdText = ab.cd > 0 ? ab.cd + 't CD' : 'No CD';
+            const cdColor = ab.cd > 0 ? 'var(--text-dim)' : '#2ecc71';
+            let effectBadges = '';
+            (ab.effects || []).forEach(e => {{
+                if (e.type === 'bleed') effectBadges += '<span style="background:rgba(231,76,60,0.2);color:#e74c3c;padding:2px 8px;border-radius:4px;font-size:11px">🩸 Bleed ' + (e.dur||0) + 't</span> ';
+                else if (e.type === 'bonebreak') effectBadges += '<span style="background:rgba(241,196,15,0.2);color:#f1c40f;padding:2px 8px;border-radius:4px;font-size:11px">🦴 Break ' + (e.dur||0) + 't</span> ';
+                else if (e.type === 'defense') effectBadges += '<span style="background:rgba(52,152,219,0.2);color:#3498db;padding:2px 8px;border-radius:4px;font-size:11px">🛡️ Def +' + Math.round((e.reduction||0)*100) + '%</span> ';
+                else if (e.type === 'heal') effectBadges += '<span style="background:rgba(46,204,113,0.2);color:#2ecc71;padding:2px 8px;border-radius:4px;font-size:11px">💚 Heal ' + Math.round((e.pct||0)*100) + '%</span> ';
+            }});
+            const card = document.createElement('div');
+            card.style.cssText = 'padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent)';
+            card.id = 'ability-' + idx;
+            card.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                    <span style="font-weight:700;color:var(--text-bright);font-size:15px">⚔️ ${{ab.name}}</span>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <span style="color:${{multColor}};font-weight:600">${{mult}}</span>
+                        <span style="color:${{cdColor}};font-size:12px">${{cdText}}</span>
+                        <button onclick="editAbility(${{idx}})" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:14px;padding:2px" title="Edit">✏️</button>
+                        <button onclick="deleteAbility(${{idx}})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px" title="Delete">🗑️</button>
+                    </div>
+                </div>
+                <div style="color:var(--text-dim);font-size:13px;font-style:italic;margin-bottom:4px">${{ab.desc}}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">${{effectBadges}}</div>
+            `;
+            list.appendChild(card);
+        }});
+    }}
+
+    function deleteAbility(idx) {{
+        if (!confirm('Delete "' + dinoAbilities[idx].name + '"?')) return;
+        dinoAbilities.splice(idx, 1);
+        renderAbilities();
+    }}
+
+    function editAbility(idx) {{
+        const ab = dinoAbilities[idx];
+        const card = document.getElementById('ability-' + idx);
+        const eff = ab.effects && ab.effects[0] ? ab.effects[0] : {{}};
+        card.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                <input id="ed-name-${{idx}}" value="${{ab.name}}" placeholder="Name" style="padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                <input id="ed-desc-${{idx}}" value="${{ab.desc}}" placeholder="Description" style="padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+                <div>
+                    <label style="font-size:11px;color:var(--text-dim)">DMG (base)</label>
+                    <input id="ed-base-${{idx}}" type="number" value="${{ab.base}}" style="width:100%;padding:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                    <label style="font-size:11px;color:var(--text-dim)">Cooldown</label>
+                    <input id="ed-cd-${{idx}}" type="number" value="${{ab.cd}}" style="width:100%;padding:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                </div>
+                <div>
+                    <label style="font-size:11px;color:var(--text-dim)">Effect</label>
+                    <select id="ed-eff-${{idx}}" style="width:100%;padding:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                        <option value="">None</option>
+                        <option value="bleed" ${{eff.type==='bleed'?'selected':''}}>Bleed</option>
+                        <option value="bonebreak" ${{eff.type==='bonebreak'?'selected':''}}>Bonebreak</option>
+                        <option value="defense" ${{eff.type==='defense'?'selected':''}}>Defense</option>
+                        <option value="heal" ${{eff.type==='heal'?'selected':''}}>Heal</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:11px;color:var(--text-dim)">Duration/Value</label>
+                    <input id="ed-dur-${{idx}}" type="number" value="${{eff.dur || eff.pct ? Math.round((eff.pct||0)*100) : eff.reduction ? Math.round((eff.reduction||0)*100) : 2}}" style="width:100%;padding:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px">
+                </div>
+            </div>
+            <div style="display:flex;gap:8px">
+                <button onclick="saveEdit(${{idx}})" class="btn btn-primary" style="font-size:12px;padding:4px 12px">Save</button>
+                <button onclick="renderAbilities()" class="btn" style="font-size:12px;padding:4px 12px;background:var(--bg3);color:var(--text)">Cancel</button>
+            </div>
+        `;
+    }}
+
+    function saveEdit(idx) {{
+        const name = document.getElementById('ed-name-' + idx).value.trim();
+        const desc = document.getElementById('ed-desc-' + idx).value.trim();
+        const base = parseInt(document.getElementById('ed-base-' + idx).value) || 0;
+        const cd = parseInt(document.getElementById('ed-cd-' + idx).value) || 0;
+        const effType = document.getElementById('ed-eff-' + idx).value;
+        const durVal = parseInt(document.getElementById('ed-dur-' + idx).value) || 0;
+        if (!name) {{ alert('Name is required'); return; }}
+        dinoAbilities[idx].name = name;
+        dinoAbilities[idx].desc = desc || 'an attack';
+        dinoAbilities[idx].base = base;
+        dinoAbilities[idx].cd = cd;
+        if (effType) {{
+            const eff = {{type: effType}};
+            if (effType === 'bleed') {{ eff.dur = durVal; eff.pct = 0.03; }}
+            else if (effType === 'bonebreak') {{ eff.dur = durVal; }}
+            else if (effType === 'defense') {{ eff.dur = durVal; eff.reduction = durVal / 100; }}
+            else if (effType === 'heal') {{ eff.pct = durVal / 100; }}
+            dinoAbilities[idx].effects = [eff];
+        }} else {{
+            dinoAbilities[idx].effects = [];
+        }}
+        renderAbilities();
+    }}
+
+    function addAbility() {{
+        dinoAbilities.push({{
+            name: 'New Ability',
+            base: 100,
+            cd: 0,
+            effects: [],
+            desc: 'a custom attack'
+        }});
+        renderAbilities();
+        editAbility(dinoAbilities.length - 1);
+    }}
+
+    // Render on load
+    renderAbilities();
+
     async function saveProfile() {{
         const btn = document.getElementById('saveProfileBtn');
         btn.disabled = true;
@@ -1264,7 +1365,8 @@ async def dino_profile_page(request):
                 headers: {{'Content-Type': 'application/json'}},
                 body: JSON.stringify({{
                     id: '{dino_id}',
-                    lore: document.getElementById('loreInput').value
+                    lore: document.getElementById('loreInput').value,
+                    custom_abilities: dinoAbilities
                 }})
             }});
             const data = await r.json();
@@ -1393,6 +1495,8 @@ async def api_update_dino_profile(request):
         if d['id'] == dino_id:
             if 'lore' in data:
                 d['lore'] = data['lore']
+            if 'custom_abilities' in data:
+                d['custom_abilities'] = data['custom_abilities']
             save_dinos(all_dinos)
             await push_log(f"\ud83e\udd96 Dashboard: Updated profile for {d['name']}")
             return web.json_response({"ok": True})

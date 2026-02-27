@@ -188,7 +188,17 @@ class PackMember:
         self.fled = False
 
         # Abilities and cooldowns (each member has their own)
-        self.abilities = get_ability_pool(self.family, self.dtype, self.base_atk)
+        # Use custom abilities if defined, otherwise use family pool
+        if dino_data.get('custom_abilities'):
+            # Scale custom ability base values relative to this dino's actual ATK
+            self.abilities = []
+            for ab in dino_data['custom_abilities']:
+                scaled = dict(ab)
+                # 'base' in custom abilities is stored as multiplier*100 (100 = 1.0x ATK)
+                scaled['base'] = int(self.base_atk * (ab.get('base', 100) / 100.0))
+                self.abilities.append(scaled)
+        else:
+            self.abilities = get_ability_pool(self.family, self.dtype, self.base_atk)
         self.cooldowns = {a["name"]: 0 for a in self.abilities}
 
     @property
