@@ -1192,10 +1192,13 @@ async def dino_profile_page(request):
                 <!-- Avatar -->
                 <div style="flex-shrink:0">
                     <div style="position:relative;width:180px;height:180px;border-radius:12px;background:var(--bg);border:2px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center">
-                        <img id="avatarImg" src="{avatar_url}" alt="{dino['name']}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.parentElement.querySelector('#noAvatarText').style.display='block'">
+                        <img id="avatarImg" src="/assets/dinos/{dino_id}.png" alt="{dino['name']}" style="width:100%;height:100%;object-fit:cover" onerror="this.src='/assets/dinos/defaults/{dino_id}.png';this.onerror=function(){{this.style.display='none';document.getElementById('noAvatarText').style.display='block'}}">
                         <div id="noAvatarText" style="display:none;color:var(--text-dim);font-size:12px;text-align:center">No Avatar</div>
                         <input type="file" id="avatarUpload" accept="image/*" style="display:none" onchange="uploadAvatar(this)">
-                        <button onclick="document.getElementById('avatarUpload').click()" style="position:absolute;bottom:6px;right:6px;width:32px;height:32px;border-radius:8px;border:none;background:rgba(88,101,242,0.85);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;backdrop-filter:blur(4px)" onmouseover="this.style.background='rgba(88,101,242,1)'" onmouseout="this.style.background='rgba(88,101,242,0.85)'" title="Upload Avatar">📷</button>
+                        <div style="position:absolute;bottom:6px;right:6px;display:flex;gap:4px">
+                            <button onclick="resetAvatar()" style="width:28px;height:28px;border-radius:6px;border:none;background:rgba(231,76,60,0.85);color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;backdrop-filter:blur(4px)" title="Reset to Default">🗑️</button>
+                            <button onclick="document.getElementById('avatarUpload').click()" style="width:28px;height:28px;border-radius:6px;border:none;background:rgba(88,101,242,0.85);color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;backdrop-filter:blur(4px)" title="Upload Avatar">📷</button>
+                        </div>
                     </div>
                 </div>
 
@@ -1221,7 +1224,20 @@ async def dino_profile_page(request):
         <!-- Actions -->
         <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap">
             <button class="btn btn-primary" id="saveProfileBtn" onclick="saveProfile()">Save Changes</button>
-            <button class="btn btn-danger" onclick="if(confirm('Delete {dino['name']}?')){{fetch('/api/delete-card',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{id:'{dino_id}'}})}}).then(()=>window.location='/battle')}}">Delete Profile</button>
+            <button class="btn btn-danger" onclick="confirmDelete()">Delete Profile</button>
+        </div>
+
+        <!-- Delete Confirmation Modal -->
+        <div id="deleteModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;display:none;align-items:center;justify-content:center">
+            <div style="background:var(--card);border:2px solid #e74c3c;border-radius:12px;padding:32px;max-width:400px;text-align:center">
+                <div style="font-size:48px;margin-bottom:12px">⚠️</div>
+                <h3 style="color:#e74c3c;margin:0 0 12px">Delete {dino['name']}?</h3>
+                <p style="color:var(--text-dim);margin:0 0 24px">This will permanently remove this dinosaur from the roster, including all custom abilities and avatar. This cannot be undone.</p>
+                <div style="display:flex;gap:12px;justify-content:center">
+                    <button onclick="document.getElementById('deleteModal').style.display='none'" class="btn" style="background:var(--bg3);color:var(--text);padding:8px 24px">Cancel</button>
+                    <button onclick="executeDelete()" class="btn btn-danger" style="padding:8px 24px">Yes, Delete Forever</button>
+                </div>
+            </div>
         </div>
 
         <!-- Battle History (from Discord chat battles) -->
@@ -1417,6 +1433,41 @@ async def dino_profile_page(request):
             }}
         }};
         reader.readAsDataURL(file);
+    }}
+
+    async function resetAvatar() {{
+        if (!confirm('Reset avatar to default?')) return;
+        try {{
+            const r = await fetch('/api/reset-dino-avatar', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{ id: '{dino_id}' }})
+            }});
+            const data = await r.json();
+            if (data.ok) {{
+                const img = document.getElementById('avatarImg');
+                img.src = '/assets/dinos/defaults/{dino_id}.png?' + Date.now();
+                img.style.display = 'block';
+                img.onerror = function() {{ this.style.display='none'; document.getElementById('noAvatarText').style.display='block'; }};
+                document.getElementById('noAvatarText').style.display = 'none';
+            }}
+        }} catch(err) {{ alert('Reset error: ' + err); }}
+    }}
+
+    function confirmDelete() {{
+        const modal = document.getElementById('deleteModal');
+        modal.style.display = 'flex';
+    }}
+
+    async function executeDelete() {{
+        try {{
+            await fetch('/api/delete-card', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{ id: '{dino_id}' }})
+            }});
+            window.location = '/battle';
+        }} catch(err) {{ alert('Delete failed: ' + err); }}
     }}
 
     // Load battle history from server
@@ -3532,6 +3583,27 @@ async def api_upload_dino_avatar(request):
     except Exception as e:
         return web.json_response({"error": f"Upload failed: {str(e)}"}, status=500)
 
+@routes.post("/api/reset-dino-avatar")
+async def api_reset_dino_avatar(request):
+    """Delete custom avatar to revert to default."""
+    if not _check_auth(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    data = await request.json()
+    dino_id = data.get("id")
+    if not dino_id:
+        return web.json_response({"error": "Missing ID"}, status=400)
+
+    import os
+    custom_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino_id}.png")
+    if os.path.exists(custom_path):
+        try:
+            os.remove(custom_path)
+        except:
+            pass
+    await push_log(f"🖼️ Dashboard: Reset avatar for {dino_id} to default")
+    return web.json_response({"ok": True})
+
 # ── Server Lifecycle ─────────────────────────────────────────────
 async def start_dashboard(bot):
     """Start the admin dashboard web server. Called from bot.py on_ready()."""
@@ -3540,6 +3612,11 @@ async def start_dashboard(bot):
 
     app = web.Application()
     app.add_routes(routes)
+
+    # Serve static assets (dino avatars, frames, defaults)
+    assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+    os.makedirs(os.path.join(assets_dir, "dinos", "defaults"), exist_ok=True)
+    app.router.add_static("/assets/", assets_dir, follow_symlinks=True)
 
     runner = web.AppRunner(app)
     await runner.setup()

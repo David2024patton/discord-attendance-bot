@@ -3548,7 +3548,11 @@ async def dino(ctx, *, name: str = None):
     cw = match.get('cw', 3000)
     group_slots = _be.get_group_slots(cw)
     passive = _be.PASSIVES.get(family)
-    abilities = _be.get_ability_pool(family, dtype, 100)
+    # Use custom abilities if defined, otherwise use family pool
+    if match.get('custom_abilities'):
+        abilities = match['custom_abilities']
+    else:
+        abilities = _be.get_ability_pool(family, dtype, 100)
 
     # Build embed
     color = 0xe74c3c if dtype == 'carnivore' else 0x2ecc71
