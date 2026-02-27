@@ -908,81 +908,125 @@ async def battle_page(request):
         </div>
     </div>
 
-    <!-- Upload Modal -->
+    <!-- Create Profile Modal -->
     <div class="modal-overlay" id="uploadModal">
-        <div class="modal" style="width:550px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                <h3 style="margin:0">Create Dinosaur Profile</h3>
-                <button class="btn btn-secondary btn-sm" onclick="randomizeStats()" style="background:var(--accent);color:white;border:none" title="Generate authentic Path of Titans stats mapped to Diet">🎲 Random Stats</button>
+        <div class="modal" style="width:640px;max-height:90vh;overflow-y:auto;background:linear-gradient(145deg,var(--bg2),var(--bg));border:1px solid rgba(255,255,255,0.06);box-shadow:0 24px 80px rgba(0,0,0,0.6)">
+            <!-- Header -->
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+                <div>
+                    <h3 style="margin:0;font-size:20px;background:linear-gradient(135deg,var(--accent),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent">New Creature Profile</h3>
+                    <p style="margin:4px 0 0;color:var(--text-dim);font-size:12px">Define a custom battle card with stats &amp; avatar</p>
+                </div>
+                <button type="button" onclick="randomizeStats()" style="background:linear-gradient(135deg,var(--accent),#8b5cf6);color:white;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;transition:transform .15s,box-shadow .15s" onmouseover="this.style.transform='scale(1.05)';this.style.boxShadow='0 4px 20px rgba(88,101,242,0.4)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='none'" title="Generate balanced stats based on diet type">🎲 Randomize</button>
             </div>
-            <p style="color:var(--text-dim);margin-bottom:16px;font-size:13px;line-height:1.4">Create a custom creature profile. Upload a character portrait ('Avatar') and define their base combat statistics.</p>
-            
+
             <form id="uploadForm" enctype="multipart/form-data">
-                <div class="grid grid-2" style="gap:12px;margin-bottom:12px">
-                    <div class="form-group" style="grid-column:span 2">
-                        <label>Character Avatar (PNG/JPG):</label>
-                        <input type="file" id="imageFile" name="image" accept="image/*" required style="width:100%;padding:7px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)">
+                <!-- Avatar + Identity Row -->
+                <div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:20px">
+                    <!-- Avatar Drop Zone -->
+                    <div id="avatarDropZone" onclick="document.getElementById('imageFile').click()" style="width:120px;height:120px;flex-shrink:0;border-radius:16px;border:2px dashed var(--border);background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:border-color .2s,background .2s;overflow:hidden;position:relative" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(88,101,242,0.05)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg)'" ondragover="event.preventDefault();this.style.borderColor='var(--green)';this.style.background='rgba(67,181,129,0.1)'" ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--bg)'" ondrop="event.preventDefault();this.style.borderColor='var(--border)';this.style.background='var(--bg)';document.getElementById('imageFile').files=event.dataTransfer.files;previewAvatar(event.dataTransfer.files[0])">
+                        <div id="avatarPlaceholder" style="text-align:center;pointer-events:none">
+                            <div style="font-size:32px;margin-bottom:4px">📸</div>
+                            <div style="font-size:10px;color:var(--text-dim);line-height:1.3">Click or drag<br>to upload</div>
+                        </div>
+                        <img id="avatarPreview" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;display:none">
+                    </div>
+                    <input type="file" id="imageFile" name="image" accept="image/*" required style="display:none" onchange="previewAvatar(this.files[0])">
+
+                    <!-- ID + Name -->
+                    <div style="flex:1;display:flex;flex-direction:column;gap:10px">
+                        <div>
+                            <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;display:block">Unique ID</label>
+                            <input type="text" id="dinoId" name="id" required placeholder="shadow_rex" pattern="[a-zA-Z0-9_]+" style="width:100%;padding:10px 12px;background:var(--bg);color:var(--text-bright);border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:monospace;transition:border-color .2s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+                        </div>
+                        <div>
+                            <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;display:block">Display Name</label>
+                            <input type="text" id="dinoName" name="name" required placeholder="Shadow Rex" style="width:100%;padding:10px 12px;background:var(--bg);color:var(--text-bright);border:1px solid var(--border);border-radius:8px;font-size:14px;transition:border-color .2s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+                        </div>
                     </div>
                 </div>
 
-                <div class="grid grid-2" style="gap:12px">
-                    <div class="form-group">
-                        <label>ID (unique, no spaces):</label>
-                        <input type="text" id="dinoId" name="id" required placeholder="super_rex" pattern="[a-zA-Z0-9_]+" style="width:100%">
+                <!-- Diet Type Selector -->
+                <div style="margin-bottom:20px">
+                    <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;display:block">Diet Classification</label>
+                    <div style="display:flex;gap:8px" id="dietSelector">
+                        <button type="button" class="diet-pill active" data-diet="carnivore" onclick="selectDiet(this,'carnivore')" style="flex:1;padding:10px;border-radius:10px;border:2px solid var(--red);background:rgba(240,71,71,0.15);color:var(--red);cursor:pointer;font-weight:600;font-size:13px;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px">🥩 Carnivore</button>
+                        <button type="button" class="diet-pill" data-diet="herbivore" onclick="selectDiet(this,'herbivore')" style="flex:1;padding:10px;border-radius:10px;border:2px solid transparent;background:rgba(67,181,129,0.08);color:var(--text-dim);cursor:pointer;font-weight:600;font-size:13px;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px">🌿 Herbivore</button>
+                        <button type="button" class="diet-pill" data-diet="aquatic" onclick="selectDiet(this,'aquatic')" style="flex:1;padding:10px;border-radius:10px;border:2px solid transparent;background:rgba(59,165,235,0.08);color:var(--text-dim);cursor:pointer;font-weight:600;font-size:13px;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px">🌊 Aquatic</button>
+                        <button type="button" class="diet-pill" data-diet="flyer" onclick="selectDiet(this,'flyer')" style="flex:1;padding:10px;border-radius:10px;border:2px solid transparent;background:rgba(241,196,15,0.08);color:var(--text-dim);cursor:pointer;font-weight:600;font-size:13px;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px">🦅 Flyer</button>
                     </div>
-                    <div class="form-group">
-                        <label>Display Name:</label>
-                        <input type="text" id="dinoName" name="name" required placeholder="Super Rex" style="width:100%">
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label>Diet Type:</label>
-                    <select id="dinoType" name="type" required style="width:100%">
-                        <option value="carnivore">Carnivore</option>
-                        <option value="herbivore">Herbivore</option>
-                        <option value="aquatic">Aquatic</option>
-                        <option value="flyer">Flyer</option>
-                    </select>
+                    <select id="dinoType" name="type" required style="display:none"><option value="carnivore" selected>Carnivore</option><option value="herbivore">Herbivore</option><option value="aquatic">Aquatic</option><option value="flyer">Flyer</option></select>
                 </div>
 
-                <div class="form-group">
-                    <label>Dino Lore / Description (Optional):</label>
-                    <textarea id="dinoLore" name="lore" rows="3" placeholder="Enter the backstory or details about this dinosaur..." style="width:100%;padding:10px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);font-family:inherit;resize:vertical"></textarea>
+                <!-- Lore -->
+                <div style="margin-bottom:20px">
+                    <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:block">Lore / Description</label>
+                    <textarea id="dinoLore" name="lore" rows="2" placeholder="The backstory of this creature..." style="width:100%;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;resize:vertical;transition:border-color .2s;line-height:1.5" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
                 </div>
 
-                <div class="grid grid-2" style="gap:12px">
-                    <div class="form-group">
-                        <label>Combat Weight (CW):</label>
-                        <input type="number" id="dinoCW" name="cw" required value="3000" min="100" style="width:100%">
-                    </div>
-                    <div class="form-group">
-                        <label>Health (HP):</label>
-                        <input type="number" id="dinoHP" name="hp" required value="500" min="10" style="width:100%">
-                    </div>
-                    <div class="form-group">
-                        <label>Attack Damage (ATK):</label>
-                        <input type="number" id="dinoATK" name="atk" required value="50" min="1" style="width:100%">
-                    </div>
-                    <div class="form-group">
-                        <label>Armor (DEF multiplier):</label>
-                        <input type="number" id="dinoArmor" name="armor" step="0.1" required value="1.0" min="0.1" style="width:100%">
-                    </div>
-                    <div class="form-group">
-                        <label>Speed (SPD initative):</label>
-                        <input type="number" id="dinoSPD" name="spd" required value="500" min="10" style="width:100%">
+                <!-- Stats Grid -->
+                <div style="margin-bottom:20px">
+                    <label style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;display:block">Combat Statistics</label>
+                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
+                        <div style="background:var(--bg);border-radius:10px;padding:10px;text-align:center;border:1px solid var(--border)">
+                            <div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">⚖️ Weight</div>
+                            <input type="number" id="dinoCW" name="cw" required value="3000" min="100" style="width:100%;text-align:center;padding:6px 2px;background:transparent;color:var(--text-bright);border:none;font-size:16px;font-weight:700;border-bottom:2px solid var(--border);transition:border-color .2s" onfocus="this.style.borderBottomColor='var(--accent)'" onblur="this.style.borderBottomColor='var(--border)'">
+                        </div>
+                        <div style="background:var(--bg);border-radius:10px;padding:10px;text-align:center;border:1px solid var(--border)">
+                            <div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">❤️ HP</div>
+                            <input type="number" id="dinoHP" name="hp" required value="500" min="10" style="width:100%;text-align:center;padding:6px 2px;background:transparent;color:var(--green);border:none;font-size:16px;font-weight:700;border-bottom:2px solid rgba(67,181,129,0.3);transition:border-color .2s" onfocus="this.style.borderBottomColor='var(--green)'" onblur="this.style.borderBottomColor='rgba(67,181,129,0.3)'">
+                        </div>
+                        <div style="background:var(--bg);border-radius:10px;padding:10px;text-align:center;border:1px solid var(--border)">
+                            <div style="font-size:10px;color:var(--red);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">⚔️ ATK</div>
+                            <input type="number" id="dinoATK" name="atk" required value="50" min="1" style="width:100%;text-align:center;padding:6px 2px;background:transparent;color:var(--red);border:none;font-size:16px;font-weight:700;border-bottom:2px solid rgba(240,71,71,0.3);transition:border-color .2s" onfocus="this.style.borderBottomColor='var(--red)'" onblur="this.style.borderBottomColor='rgba(240,71,71,0.3)'">
+                        </div>
+                        <div style="background:var(--bg);border-radius:10px;padding:10px;text-align:center;border:1px solid var(--border)">
+                            <div style="font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">🛡️ DEF</div>
+                            <input type="number" id="dinoArmor" name="armor" step="0.1" required value="1.0" min="0.1" style="width:100%;text-align:center;padding:6px 2px;background:transparent;color:var(--accent);border:none;font-size:16px;font-weight:700;border-bottom:2px solid rgba(88,101,242,0.3);transition:border-color .2s" onfocus="this.style.borderBottomColor='var(--accent)'" onblur="this.style.borderBottomColor='rgba(88,101,242,0.3)'">
+                        </div>
+                        <div style="background:var(--bg);border-radius:10px;padding:10px;text-align:center;border:1px solid var(--border)">
+                            <div style="font-size:10px;color:#f1c40f;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">⚡ SPD</div>
+                            <input type="number" id="dinoSPD" name="spd" required value="500" min="10" style="width:100%;text-align:center;padding:6px 2px;background:transparent;color:#f1c40f;border:none;font-size:16px;font-weight:700;border-bottom:2px solid rgba(241,196,15,0.3);transition:border-color .2s" onfocus="this.style.borderBottomColor='#f1c40f'" onblur="this.style.borderBottomColor='rgba(241,196,15,0.3)'">
+                        </div>
                     </div>
                 </div>
-                
-                <div class="modal-actions" style="margin-top:20px;display:flex;gap:12px;justify-content:flex-end">
-                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('uploadModal').classList.remove('active')">Cancel</button>
-                    <button type="submit" class="btn btn-primary" id="uploadBtn">Save Card</button>
+
+                <!-- Actions -->
+                <div style="display:flex;gap:12px;justify-content:flex-end;padding-top:16px;border-top:1px solid var(--border)">
+                    <button type="button" onclick="document.getElementById('uploadModal').classList.remove('active')" style="padding:10px 24px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;transition:all .2s" onmouseover="this.style.background='var(--bg)';this.style.color='var(--text)'" onmouseout="this.style.background='transparent';this.style.color='var(--text-dim)'">Cancel</button>
+                    <button type="submit" id="uploadBtn" style="padding:10px 28px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--accent),#8b5cf6);color:white;cursor:pointer;font-size:14px;font-weight:600;transition:transform .15s,box-shadow .15s;display:flex;align-items:center;gap:6px" onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 20px rgba(88,101,242,0.4)'" onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='none'">✨ Create Profile</button>
                 </div>
             </form>
         </div>
     </div>
 
     <script>
+    function previewAvatar(file) {{
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {{
+            const img = document.getElementById('avatarPreview');
+            img.src = e.target.result;
+            img.style.display = 'block';
+            document.getElementById('avatarPlaceholder').style.display = 'none';
+        }};
+        reader.readAsDataURL(file);
+    }}
+
+    function selectDiet(btn, diet) {{
+        document.getElementById('dinoType').value = diet;
+        const colors = {{ carnivore: 'var(--red)', herbivore: 'var(--green)', aquatic: '#3ba5eb', flyer: '#f1c40f' }};
+        const bgs = {{ carnivore: 'rgba(240,71,71,0.15)', herbivore: 'rgba(67,181,129,0.15)', aquatic: 'rgba(59,165,235,0.15)', flyer: 'rgba(241,196,15,0.15)' }};
+        document.querySelectorAll('#dietSelector .diet-pill').forEach(function(p) {{
+            p.style.borderColor = 'transparent';
+            p.style.background = 'rgba(255,255,255,0.03)';
+            p.style.color = 'var(--text-dim)';
+        }});
+        btn.style.borderColor = colors[diet];
+        btn.style.background = bgs[diet];
+        btn.style.color = colors[diet];
+    }}
+
     function randomizeStats() {{
         const diet = document.getElementById('dinoType').value;
         let cw, hp, atk, armor, spd;
