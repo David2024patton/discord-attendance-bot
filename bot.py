@@ -3442,6 +3442,99 @@ async def dinobattle(ctx):
     else:
         await ctx.send(embed=win_embed, view=post_view)
 
+@bot.command(help="Look up a dinosaur's abilities, traits, and passives. Usage: !dino <name>")
+async def dino(ctx, *, name: str = None):
+    if not name:
+        await ctx.send("Usage: `!dino <name>` — e.g. `!dino utahraptor`", delete_after=10)
+        return
+
+    all_dinos = load_dinos()
+    if not all_dinos:
+        await ctx.send("No dinosaurs in the roster yet!", delete_after=10)
+        return
+
+    # Fuzzy match — find closest dino
+    query = name.lower().strip()
+    match = None
+    for d in all_dinos:
+        if query == d['id'].lower() or query == d['name'].lower():
+            match = d
+            break
+    if not match:
+        for d in all_dinos:
+            if query in d['id'].lower() or query in d['name'].lower():
+                match = d
+                break
+    if not match:
+        names = ", ".join(d['name'] for d in all_dinos[:20])
+        await ctx.send(f"Dinosaur **{name}** not found. Available: {names}", delete_after=15)
+        return
+
+    import battle_engine as _be
+
+    dino_id = match['id']
+    family = _be.SPECIES_FAMILIES.get(dino_id.lower(), "generic")
+    family_label = family.replace("_", " ").title()
+    dtype = match.get('type', 'carnivore')
+    cw = match.get('cw', 3000)
+    group_slots = _be.get_group_slots(cw)
+    passive = _be.PASSIVES.get(family)
+    abilities = _be.get_ability_pool(family, dtype, 100)
+
+    # Build embed
+    color = 0xe74c3c if dtype == 'carnivore' else 0x2ecc71
+    type_emoji = '🔴' if dtype == 'carnivore' else '🟢'
+    embed = discord.Embed(
+        title=f"🦕 {match['name']}",
+        color=color
+    )
+    embed.add_field(name="Info", value=(
+        f"{type_emoji} **{dtype.capitalize()}** • **{family_label}**\n"
+        f"⚖️ CW: **{cw}** • 👥 Group Slots: **{group_slots}**"
+    ), inline=False)
+
+    if passive:
+        embed.add_field(name=f"✨ Passive: {passive[0]}", value=passive[1], inline=False)
+
+    # Abilities
+    moves_text = ""
+    for ab in abilities:
+        if ab["base"] > 0:
+            mult = ab["base"] / 100.0
+            dmg = f"**{mult:.1f}x** ATK"
+        else:
+            dmg = "**Utility**"
+        cd = f"CD: {ab['cd']}t" if ab["cd"] > 0 else "No CD"
+        effects_parts = []
+        for eff in ab.get("effects", []):
+            t = eff.get("type", "")
+            if t == "bleed":
+                effects_parts.append(f"🩸 Bleed {eff.get('dur',0)}t")
+            elif t == "bonebreak":
+                effects_parts.append(f"🦴 Break {eff.get('dur',0)}t")
+            elif t == "defense":
+                effects_parts.append(f"🛡️ Def +{int(eff.get('reduction',0)*100)}%")
+            elif t == "heal":
+                effects_parts.append(f"💚 Heal {int(eff.get('pct',0)*100)}%")
+        eff_str = " | ".join(effects_parts)
+        if eff_str:
+            eff_str = f" | {eff_str}"
+        moves_text += f"⚔️ **{ab['name']}** — {dmg} ({cd}){eff_str}\n*{ab['desc']}*\n\n"
+
+    embed.add_field(name="🎯 Ability Pool", value=moves_text.strip(), inline=False)
+
+    if match.get('lore'):
+        embed.add_field(name="📜 Lore", value=match['lore'][:200], inline=False)
+
+    # Try to set thumbnail
+    avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino_id}.png")
+    if os.path.exists(avatar_path):
+        file = discord.File(avatar_path, filename="dino.png")
+        embed.set_thumbnail(url="attachment://dino.png")
+        await ctx.send(embed=embed, file=file)
+    else:
+        await ctx.send(embed=embed)
+
 @bot.command(help="Show the top bettors for Dino Battles.")
 async def dinostats(ctx):
     lb = load_dino_lb()

@@ -1126,26 +1126,75 @@ async def dino_profile_page(request):
     lore = dino.get('lore', '')
     safe_lore = str(lore).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
-    # Build stat bars
-    stat_defs = [
-        ("Combat Weight", "cw", dino.get('cw', 3000), 10000, "#9b59b6"),
-        ("Health", "hp", dino.get('hp', 500), 1500, "#2ecc71"),
-        ("Attack", "atk", dino.get('atk', 50), 200, "#e74c3c"),
-        ("Defense", "armor", dino.get('armor', 1.0), 3.0, "#3498db"),
-        ("Speed", "spd", dino.get('spd', 500), 1500, "#f1c40f"),
-    ]
+    # Build abilities & traits info from battle engine data
+    import battle_engine as _be
 
-    stats_html = ""
-    for label, key, val, max_val, color in stat_defs:
-        pct = min(100, int((float(val) / max_val) * 100))
-        stats_html += f"""
-        <div style="margin-bottom:16px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-                <span style="font-size:13px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px">{label}</span>
-                <span style="font-size:15px;font-weight:700;color:var(--text-bright)">{val}</span>
+    dino_family = _be.SPECIES_FAMILIES.get(dino_id.lower(), "generic")
+    family_label = dino_family.replace("_", " ").title()
+    cw_val = dino.get('cw', 3000)
+    group_slots = _be.get_group_slots(cw_val)
+    passive = _be.PASSIVES.get(dino_family)
+    abilities = _be.get_ability_pool(dino_family, dino['type'], 100)  # base_atk=100 for display multipliers
+
+    # Effect badges HTML
+    def _effect_badge(eff):
+        t = eff.get("type", "")
+        if t == "bleed":
+            return f'<span style="background:rgba(231,76,60,0.2);color:#e74c3c;padding:2px 8px;border-radius:4px;font-size:11px">🩸 Bleed {eff.get("dur",0)}t</span>'
+        elif t == "bonebreak":
+            return f'<span style="background:rgba(241,196,15,0.2);color:#f1c40f;padding:2px 8px;border-radius:4px;font-size:11px">🦴 Bonebreak {eff.get("dur",0)}t</span>'
+        elif t == "defense":
+            return f'<span style="background:rgba(52,152,219,0.2);color:#3498db;padding:2px 8px;border-radius:4px;font-size:11px">🛡️ Defense +{int(eff.get("reduction",0)*100)}%</span>'
+        elif t == "heal":
+            return f'<span style="background:rgba(46,204,113,0.2);color:#2ecc71;padding:2px 8px;border-radius:4px;font-size:11px">💚 Heal {int(eff.get("pct",0)*100)}%</span>'
+        return ""
+
+    abilities_html = ""
+    for ab in abilities:
+        # Calculate damage multiplier relative to base
+        if ab["base"] > 0:
+            mult = ab["base"] / 100.0
+            dmg_text = f'<span style="color:#e74c3c;font-weight:600">{mult:.1f}x ATK</span>'
+        else:
+            dmg_text = '<span style="color:#3498db;font-weight:600">Utility</span>'
+        cd_text = f'<span style="color:var(--text-dim);font-size:12px">{ab["cd"]}t CD</span>' if ab["cd"] > 0 else '<span style="color:#2ecc71;font-size:12px">No CD</span>'
+        effects_html = " ".join(_effect_badge(e) for e in ab.get("effects", []))
+        abilities_html += f"""
+        <div style="padding:12px;background:var(--bg);border-radius:8px;border-left:3px solid var(--accent)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <span style="font-weight:700;color:var(--text-bright);font-size:15px">⚔️ {ab['name']}</span>
+                <div style="display:flex;gap:8px;align-items:center">{dmg_text} {cd_text}</div>
             </div>
-            <div style="background:var(--bg);border-radius:6px;height:10px;overflow:hidden">
-                <div style="width:{pct}%;height:100%;background:linear-gradient(90deg,{color},{color}88);border-radius:6px;transition:width 1s ease"></div>
+            <div style="color:var(--text-dim);font-size:13px;font-style:italic;margin-bottom:4px">{ab['desc']}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">{effects_html}</div>
+        </div>"""
+
+    # Passive HTML
+    passive_html = ""
+    if passive:
+        passive_html = f"""
+        <div style="padding:12px;background:rgba(241,196,15,0.08);border-radius:8px;border-left:3px solid #f1c40f;margin-bottom:16px">
+            <div style="font-weight:700;color:#f1c40f;font-size:14px;margin-bottom:2px">✨ {passive[0]}</div>
+            <div style="color:var(--text-dim);font-size:13px">{passive[1]}</div>
+        </div>"""
+
+    traits_html = f"""
+        <div class="card" style="margin-top:20px">
+            <h3 style="margin-bottom:16px;font-weight:700;color:var(--text-bright)">Abilities & Traits</h3>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+                <div style="padding:8px 14px;background:var(--bg);border-radius:8px;font-size:13px">
+                    <span style="color:var(--text-dim)">Family:</span> <span style="color:var(--text-bright);font-weight:600">{family_label}</span>
+                </div>
+                <div style="padding:8px 14px;background:var(--bg);border-radius:8px;font-size:13px">
+                    <span style="color:var(--text-dim)">CW:</span> <span style="color:#9b59b6;font-weight:600">{cw_val}</span>
+                </div>
+                <div style="padding:8px 14px;background:var(--bg);border-radius:8px;font-size:13px">
+                    <span style="color:var(--text-dim)">Group Slots:</span> <span style="color:#3498db;font-weight:600">{group_slots}</span>
+                </div>
+            </div>
+            {passive_html}
+            <div style="display:flex;flex-direction:column;gap:10px">
+                {abilities_html}
             </div>
         </div>"""
 
@@ -1185,11 +1234,8 @@ async def dino_profile_page(request):
             </div>
         </div>
 
-        <!-- Stats Card -->
-        <div class="card" style="margin-top:20px">
-            <h3 style="margin-bottom:20px;font-weight:700;color:var(--text-bright)">Combat Statistics</h3>
-            {stats_html}
-        </div>
+        <!-- Abilities & Traits -->
+        {traits_html}
 
         <!-- Actions -->
         <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end;flex-wrap:wrap">
