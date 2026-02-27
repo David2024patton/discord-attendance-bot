@@ -2713,62 +2713,72 @@ async def dinobattle(ctx):
     await asyncio.sleep(5)
     
     # ----------------------------------------------------
-    # Stage 3: Combat Resolution & Winner Reveal
+    # Stage 3: Combat Resolution via Battle Engine
     # ----------------------------------------------------
-    hp_a = float(dino_a['hp'])
-    hp_b = float(dino_b['hp'])
+    import battle_engine
     
-    def calc_damage(attacker, defender):
-        dmg = (float(attacker['cw']) / float(defender['cw'])) * float(attacker['atk'])
-        dmg = dmg / max(0.1, float(defender['armor']))
-        return max(1.0, dmg)
+    result = battle_engine.simulate_battle(
+        dino_a, dino_b,
+        pack_a=dino_a.get('pack_size', 1),
+        pack_b=dino_b.get('pack_size', 1)
+    )
+    
+    fa = result["fighter_a"]
+    fb = result["fighter_b"]
+    
+    # Show passive info if any
+    passive_lines = []
+    if fa.get("passive"):
+        passive_lines.append(f"🔸 {fa['name']}: *{fa['passive']}*")
+    if fb.get("passive"):
+        passive_lines.append(f"🔸 {fb['name']}: *{fb['passive']}*")
+    if passive_lines:
+        passive_embed = discord.Embed(
+            title="📋 Passive Abilities Active",
+            description="\n".join(passive_lines),
+            color=0x3498db
+        )
+        await ctx.send(embed=passive_embed)
+    
+    # Post turns one at a time with delays
+    for turn_lines in result["turns"]:
+        turn_text = "\n".join(turn_lines)
+        # Truncate if over embed limit
+        if len(turn_text) > 1900:
+            turn_text = turn_text[:1900] + "..."
+        turn_embed = discord.Embed(
+            description=turn_text,
+            color=0xe67e22
+        )
+        await ctx.send(embed=turn_embed)
+        await asyncio.sleep(2)
 
-    fighter1 = dino_a
-    fighter2 = dino_b
-    
-    hps = {fighter1['name']: float(fighter1['hp']), fighter2['name']: float(fighter2['hp'])}
-    
-    log = []
-    round_count = 1
-    
-    # Simultaneous attacks
-    while hps[fighter1['name']] > 0 and hps[fighter2['name']] > 0 and round_count <= 20: 
-        dmg1 = calc_damage(fighter1, fighter2)
-        dmg2 = calc_damage(fighter2, fighter1)
-        
-        hps[fighter2['name']] -= dmg1
-        hps[fighter1['name']] -= dmg2
-        
-        log.append(f"**R{round_count}**: {fighter1['name']} deals `{int(dmg1)}` | {fighter2['name']} deals `{int(dmg2)}`")
-        round_count += 1
-
+    # Determine winner & loser
     winner = None
     loser = None
-    if hps[fighter1['name']] <= 0 and hps[fighter2['name']] <= 0:
-        winner = None # Tie!
-    elif round_count > 20 and hps[fighter1['name']] > 0 and hps[fighter2['name']] > 0:
-        winner = None # Tie by stamina exhaustion
-    elif hps[fighter1['name']] <= 0:
-        winner = fighter2
-        loser = fighter1
-    else:
-        winner = fighter1
-        loser = fighter2
+    if result["winner"] == "a":
+        winner = dino_a
+        loser = dino_b
+    elif result["winner"] == "b":
+        winner = dino_b
+        loser = dino_a
 
-    if winner:
-        log.append(f"💀 **{loser['name']}** collapses!")
-    
     if winner:
         winning_bets = view.bets_a if winner['name'] == dino_a['name'] else view.bets_b
         
+        hp_left = fa['hp'] if result["winner"] == "a" else fb['hp']
+        hp_max = fa['max_hp'] if result["winner"] == "a" else fb['max_hp']
+        
         win_embed = discord.Embed(
-            title=f"🏆 The winner is... **{winner['name']}**!",
-            description="\n".join(log[-8:]), 
+            title=f"🏆 The winner is... **{result['winner_name']}**!",
+            description=f"Surviving with **{hp_left}/{hp_max} HP**\n\n"
+                        f"💀 {result['loser_name']} has been defeated!",
             color=0x2ecc71
         )
         
         # Try to show winner's face
-        winner_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{winner['id']}.png")
+        winner_id = winner.get('id', '')
+        winner_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{winner_id}.png")
         if os.path.exists(winner_path):
             win_file = discord.File(winner_path, filename="winner.png")
             win_embed.set_thumbnail(url="attachment://winner.png")
@@ -2779,7 +2789,7 @@ async def dinobattle(ctx):
         winning_bets = view.bets_tie
         win_embed = discord.Embed(
             title="⚖️ It's a TIE!",
-            description="Both titans collapsed, or fought to a standstill!\n\n" + "\n".join(log[-6:]), 
+            description="Both titans collapsed, or fought to a standstill!",
             color=0x95a5a6
         )
         attachments = []
@@ -2817,7 +2827,7 @@ async def dinobattle(ctx):
                 
     save_dino_lb(lb)
 
-    win_embed.set_footer(text="Combat Mechanics powered by authentic Path of Titans formulas")
+    win_embed.set_footer(text="Combat powered by authentic Path of Titans formulas • Oath Bot")
     
     if winning_bets:
         mentions = " ".join([f"<@{uid}>" for uid in winning_bets])
