@@ -3235,21 +3235,31 @@ async def dinobattle(ctx):
         await ctx.send(embed=passive_embed)
     
     # Post turns as a single live-updating embed with HP bars
-    def _hp_bar(hp, max_hp, width=10):
+    # Green = left dino (A), Red = right dino (B)
+    GREEN = "\u001b[0;32m"
+    RED = "\u001b[0;31m"
+    YELLOW = "\u001b[0;33m"
+    RESET = "\u001b[0m"
+
+    def _hp_bar_line(name, hp, max_hp, color, width=10):
         pct = max(0, hp / max_hp) if max_hp > 0 else 0
         filled = round(pct * width)
         empty = width - filled
+        # Bar color changes based on HP %
         if pct > 0.5:
-            return f"```ansi\n\u001b[0;32m{'█' * filled}{'░' * empty}\u001b[0m {hp}/{max_hp}\n```"
+            bar_col = GREEN
         elif pct > 0.25:
-            return f"```ansi\n\u001b[0;33m{'█' * filled}{'░' * empty}\u001b[0m {hp}/{max_hp}\n```"
+            bar_col = YELLOW
         else:
-            return f"```ansi\n\u001b[0;31m{'█' * filled}{'░' * empty}\u001b[0m {hp}/{max_hp}\n```"
+            bar_col = RED
+        return f"{color}{name}{RESET}  {bar_col}{'█' * filled}{'░' * empty}{RESET} {hp}/{max_hp}"
 
     a_max = fa['max_hp']
     b_max = fb['max_hp']
     a_hp_current = a_max
     b_hp_current = b_max
+    a_name = fa['name']
+    b_name = fb['name']
     combat_lines = []
     battle_embed = discord.Embed(title="⚔️ BATTLE IN PROGRESS", color=0xe67e22)
     battle_msg = await ctx.send(embed=battle_embed)
@@ -3264,20 +3274,30 @@ async def dinobattle(ctx):
             a_hp_current = fa['hp']
             b_hp_current = fb['hp']
 
-        # Build HP bars header (always visible at top)
+        # Build HP bars header as one ANSI block (always visible at top)
         hp_header = (
-            f"**{fa['name']}** {_hp_bar(max(0, a_hp_current), a_max)}"
-            f"**{fb['name']}** {_hp_bar(max(0, b_hp_current), b_max)}"
+            f"```ansi\n"
+            f"{_hp_bar_line(a_name, max(0, a_hp_current), a_max, GREEN)}\n"
+            f"{_hp_bar_line(b_name, max(0, b_hp_current), b_max, RED)}\n"
+            f"```"
         )
 
         # Filter out summary lines
         turn_content = [line for line in turn_lines if not line.startswith("📊")]
 
+        # Color combat log lines by which dino is acting
+        def _color_line(line):
+            if line.startswith(a_name) or a_name in line[:len(a_name)+5]:
+                return f"```ansi\n{GREEN}{line}{RESET}\n```"
+            elif line.startswith(b_name) or b_name in line[:len(b_name)+5]:
+                return f"```ansi\n{RED}{line}{RESET}\n```"
+            return line
+
         # Feed each line one by one within this turn
         visible_lines = []
         for line_idx, line in enumerate(turn_content):
-            visible_lines.append(line)
-            desc = hp_header + "\n" + "\n".join(visible_lines)
+            visible_lines.append(_color_line(line))
+            desc = hp_header + "\n".join(visible_lines)
             if len(desc) > 3900:
                 desc = desc[:3900]
             battle_embed.description = desc
