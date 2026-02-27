@@ -1192,77 +1192,89 @@ def _render_nesting_leaderboard_image(entries, clicker_id):
 # Dino Battle Image Renderer
 # ----------------------------
 def _render_vs_image(dino_a, dino_b):
-    """Render a side-by-side trading card battle image. Returns a BytesIO object."""
+    """Render a side-by-side trading card battle image with fantasy frame. Returns a BytesIO object."""
     CARD_WIDTH = 300
     CARD_HEIGHT = 450
     PADDING = 40
-    VS_SIZE = 100
     TOTAL_WIDTH = (CARD_WIDTH * 2) + (PADDING * 3)
     TOTAL_HEIGHT = CARD_HEIGHT + (PADDING * 2)
 
     BG_COLOR = (20, 22, 25)
-    CARD_BG_A = (88, 28, 28) if dino_a['type'] == 'carnivore' else (28, 88, 48)
-    CARD_BG_B = (88, 28, 28) if dino_b['type'] == 'carnivore' else (28, 88, 48)
-    CARD_OUTLINE = (241, 196, 15)
     TEXT_COLOR = (255, 255, 255)
 
-    img = Image.new("RGB", (TOTAL_WIDTH, TOTAL_HEIGHT), BG_COLOR)
+    img = Image.new("RGBA", (TOTAL_WIDTH, TOTAL_HEIGHT), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
     try:
-        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 28)
-        font_med = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-        font_vs = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
+        font_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+        font_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+        font_stat_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+        font_stat_val = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+        font_vs = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 42)
     except OSError:
-        font_large = ImageFont.load_default()
-        font_med = ImageFont.load_default()
+        font_name = ImageFont.load_default()
+        font_sub = ImageFont.load_default()
+        font_stat_label = ImageFont.load_default()
+        font_stat_val = ImageFont.load_default()
         font_vs = ImageFont.load_default()
 
-    def draw_card(x_offset, bg_color, dino, side="left"):
-        # Card Background
-        draw.rectangle(
-            [(x_offset, PADDING), (x_offset + CARD_WIDTH, PADDING + CARD_HEIGHT)],
-            fill=bg_color, outline=CARD_OUTLINE, width=4
-        )
-        
-        # Check if custom frame exists
-        frame_exists = False
-        frame_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "frames", f"{side}_frame.png")
-        if os.path.exists(frame_path):
-            frame_exists = True
-        
-        # Avatar
+    # Load card frame template
+    frame_path = os.path.join(os.path.dirname(__file__), "assets", "card_frame.png")
+    try:
+        card_frame = Image.open(frame_path).convert("RGBA")
+        card_frame = card_frame.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.LANCZOS)
+        has_frame = True
+    except Exception:
+        has_frame = False
+
+    def draw_card(x_offset, dino, side="left"):
+        # Diet tint behind everything
+        tint_color = (88, 28, 28, 180) if dino['type'] == 'carnivore' else (28, 68, 48, 180)
+        tint = Image.new("RGBA", (CARD_WIDTH, CARD_HEIGHT), tint_color)
+        img.paste(tint, (x_offset, PADDING), tint)
+
+        # Avatar — fill the upper portrait area of the frame
+        avatar_region = (CARD_WIDTH - 40, int(CARD_HEIGHT * 0.50))
+        avatar_y = PADDING + 20
+        avatar_x = x_offset + 20
         try:
+            # Check custom frame first
+            custom_frame_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "frames", f"{side}_frame.png")
+            has_custom_frame = os.path.exists(custom_frame_path)
+
             avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", f"{dino['id']}.png")
             if not os.path.exists(avatar_path):
                 avatar_path = os.path.join(os.path.dirname(__file__), "assets", "dinos", "defaults", f"{dino['id']}.png")
             avatar = Image.open(avatar_path).convert("RGBA")
-            if frame_exists:
-                # Fill behind the frame area entirely
-                avatar = avatar.resize((CARD_WIDTH - 8, CARD_WIDTH - 8), Image.Resampling.LANCZOS)
-                img.paste(avatar, (x_offset + 4, PADDING + 10), avatar)
-            else:
-                # Classic Ellipse formatting
-                avatar = avatar.resize((200, 200), Image.Resampling.LANCZOS)
-                mask = Image.new("L", (200, 200), 0)
-                mask_draw = ImageDraw.Draw(mask)
-                mask_draw.ellipse((0, 0, 200, 200), fill=255)
-                img.paste(avatar, (x_offset + 50, PADDING + 60), mask)
+            avatar = avatar.resize(avatar_region, Image.Resampling.LANCZOS)
+
+            # Apply circular mask to avatar for clean look
+            mask = Image.new("L", avatar_region, 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.rounded_rectangle([(0, 0), avatar_region], radius=12, fill=255)
+            img.paste(avatar, (avatar_x, avatar_y), mask)
+
+            # If custom frame exists, overlay it
+            if has_custom_frame:
+                try:
+                    custom_frame = Image.open(custom_frame_path).convert("RGBA")
+                    custom_frame = custom_frame.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.LANCZOS)
+                    img.paste(custom_frame, (x_offset, PADDING), custom_frame)
+                except Exception:
+                    pass
         except Exception:
-            # Fallback if image not found
-            draw.rectangle([(x_offset + 50, PADDING + 60), (x_offset + 250, PADDING + 260)], fill=(50, 50, 50))
-            draw.text((x_offset + 95, PADDING + 150), "No Image", fill=TEXT_COLOR, font=font_med)
+            draw.rounded_rectangle(
+                [(avatar_x, avatar_y), (avatar_x + avatar_region[0], avatar_y + avatar_region[1])],
+                radius=12, fill=(40, 40, 40)
+            )
+            draw.text((avatar_x + avatar_region[0]//2 - 30, avatar_y + avatar_region[1]//2 - 8),
+                       "No Image", fill=TEXT_COLOR, font=font_sub)
 
-        # Custom Frame Overlay
-        if frame_exists:
-            try:
-                frame_img = Image.open(frame_path).convert("RGBA")
-                frame_img = frame_img.resize((CARD_WIDTH, CARD_HEIGHT), Image.Resampling.LANCZOS)
-                img.paste(frame_img, (x_offset, PADDING), frame_img)
-            except Exception:
-                pass
+        # Overlay the card frame template on top
+        if has_frame:
+            img.paste(card_frame, (x_offset, PADDING), card_frame)
 
-        # Name — split parenthetical mod info to subtitle
+        # Name — positioned in the name banner area of the frame
         import re as _re
         full_name = dino['name']
         m = _re.match(r'^(.+?)\s*\((.+)\)$', full_name)
@@ -1273,73 +1285,101 @@ def _render_vs_image(dino_a, dino_b):
             base_name = full_name
             subtitle = None
 
-        font_name = font_large
-        name_bbox = draw.textbbox((0, 0), base_name, font=font_name)
-        if (name_bbox[2] - name_bbox[0]) > CARD_WIDTH - 20:
+        # Shrink font if name is too wide
+        fn = font_name
+        name_bbox = draw.textbbox((0, 0), base_name, font=fn)
+        name_w = name_bbox[2] - name_bbox[0]
+        if name_w > CARD_WIDTH - 40:
             try:
-                font_name = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
-                name_bbox = draw.textbbox((0, 0), base_name, font=font_name)
+                fn = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+                name_bbox = draw.textbbox((0, 0), base_name, font=fn)
+                name_w = name_bbox[2] - name_bbox[0]
             except OSError:
                 pass
-        name_x = x_offset + (CARD_WIDTH - (name_bbox[2] - name_bbox[0])) // 2
-        # Stroke for legibility
-        draw.text((name_x-1, PADDING + 14), base_name, fill=(0,0,0), font=font_name)
-        draw.text((name_x+1, PADDING + 16), base_name, fill=(0,0,0), font=font_name)
-        draw.text((name_x, PADDING + 15), base_name, fill=TEXT_COLOR, font=font_name)
+
+        # Name banner area (below portrait, in frame banner region)
+        name_y = PADDING + int(CARD_HEIGHT * 0.54)
+        name_x = x_offset + (CARD_WIDTH - name_w) // 2
+
+        # Shadow + main text for legibility
+        for dx, dy in [(-1,-1),(1,-1),(-1,1),(1,1),(0,-1),(0,1),(-1,0),(1,0)]:
+            draw.text((name_x+dx, name_y+dy), base_name, fill=(0,0,0), font=fn)
+        draw.text((name_x, name_y), base_name, fill=TEXT_COLOR, font=fn)
 
         if subtitle:
-            try:
-                font_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
-            except OSError:
-                font_sub = font_med
             sub_bbox = draw.textbbox((0, 0), subtitle, font=font_sub)
-            sub_x = x_offset + (CARD_WIDTH - (sub_bbox[2] - sub_bbox[0])) // 2
-            draw.text((sub_x, PADDING + 40), subtitle, fill=(180, 180, 180), font=font_sub)
+            sub_w = sub_bbox[2] - sub_bbox[0]
+            sub_x = x_offset + (CARD_WIDTH - sub_w) // 2
+            sub_y = name_y + 24
+            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                draw.text((sub_x+dx, sub_y+dy), subtitle, fill=(0,0,0), font=font_sub)
+            draw.text((sub_x, sub_y), subtitle, fill=(180, 180, 180), font=font_sub)
 
-        # Stats Table
-        stats_y = PADDING + 270
-        stat_pad = 28
-        
+        # Stats — rendered as compact badges in the lower portion of the card
+        stats_y = PADDING + int(CARD_HEIGHT * 0.67)
+        stat_spacing = 30
         stats = [
-            ("CW", dino.get('cw', 3000), (155, 89, 182), 10000),  # Max CW ~10000
-            ("HP", dino.get('hp', 500), (46, 204, 113), 1500),    # Max HP ~1500
-            ("ATK", dino.get('atk', 50), (231, 76, 60), 200),     # Max ATK ~200
-            ("DEF", dino.get('armor', 1.0), (52, 152, 219), 3.0),   # Max Armor ~3.0
-            ("SPD", dino.get('spd', 500), (241, 196, 15), 1500)   # Max SPD ~1500
+            ("CW", str(dino.get('cw', 3000)), (155, 89, 182)),
+            ("HP", str(dino.get('hp', 500)), (46, 204, 113)),
+            ("ATK", str(dino.get('atk', 50)), (231, 76, 60)),
+            ("DEF", str(dino.get('armor', 1.0)), (52, 152, 219)),
+            ("SPD", str(dino.get('spd', 500)), (241, 196, 15)),
         ]
-        
-        for label, val, color, max_val in stats:
-            # Stroke for legibility over frame
-            draw.text((x_offset + 19, stats_y-1), f"{label}:", fill=(0,0,0), font=font_med)
-            draw.text((x_offset + 21, stats_y+1), f"{label}:", fill=(0,0,0), font=font_med)
-            draw.text((x_offset + 20, stats_y), f"{label}:", fill=TEXT_COLOR, font=font_med)
-            
-            # Stat bar background
-            bar_x = x_offset + 90
-            draw.rectangle([(bar_x, stats_y + 4), (bar_x + 130, stats_y + 20)], fill=(30, 30, 30))
-            
-            # Stat bar fill (max 130px)
-            fill_width = min(130, int((float(val) / max_val) * 130))
-            draw.rectangle([(bar_x, stats_y + 4), (bar_x + fill_width, stats_y + 20)], fill=color)
-            
-            draw.text((bar_x + 134, stats_y-1), str(val), fill=(0,0,0), font=font_med)
-            draw.text((bar_x + 136, stats_y+1), str(val), fill=(0,0,0), font=font_med)
-            draw.text((bar_x + 135, stats_y), str(val), fill=TEXT_COLOR, font=font_med)
-            stats_y += stat_pad
+
+        for label, val, color in stats:
+            # Stat badge background pill
+            pill_x = x_offset + 30
+            pill_w = CARD_WIDTH - 60
+            draw.rounded_rectangle(
+                [(pill_x, stats_y), (pill_x + pill_w, stats_y + 24)],
+                radius=4, fill=(15, 15, 20, 200)
+            )
+
+            # Label on left
+            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                draw.text((pill_x + 8 + dx, stats_y + 4 + dy), label, fill=(0,0,0), font=font_stat_label)
+            draw.text((pill_x + 8, stats_y + 4), label, fill=color, font=font_stat_label)
+
+            # Value on right
+            val_bbox = draw.textbbox((0, 0), val, font=font_stat_val)
+            val_w = val_bbox[2] - val_bbox[0]
+            val_x = pill_x + pill_w - val_w - 8
+            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                draw.text((val_x + dx, stats_y + 2 + dy), val, fill=(0,0,0), font=font_stat_val)
+            draw.text((val_x, stats_y + 2), val, fill=TEXT_COLOR, font=font_stat_val)
+
+            # Small colored accent bar
+            bar_w = min(pill_w - 70, int(pill_w * 0.4))
+            draw.rectangle([(pill_x + 50, stats_y + 19), (pill_x + 50 + bar_w, stats_y + 22)], fill=color)
+
+            stats_y += stat_spacing
 
     # Draw Card A
-    draw_card(PADDING, CARD_BG_A, dino_a, "left")
+    draw_card(PADDING, dino_a, "left")
 
-    # Draw VS text in the center
-    vs_x = PADDING + CARD_WIDTH + (PADDING // 2) - 15
-    vs_y = (TOTAL_HEIGHT // 2) - 30
-    draw.text((vs_x, vs_y), "VS", fill=(231, 76, 60), font=font_vs)
+    # Draw VS badge in center
+    vs_x = PADDING + CARD_WIDTH + (PADDING // 2)
+    vs_y = (TOTAL_HEIGHT // 2)
+    # VS circle background
+    circle_r = 28
+    draw.ellipse(
+        [(vs_x - circle_r, vs_y - circle_r), (vs_x + circle_r, vs_y + circle_r)],
+        fill=(231, 76, 60), outline=(241, 196, 15), width=3
+    )
+    vs_bbox = draw.textbbox((0, 0), "VS", font=font_vs)
+    vs_tw = vs_bbox[2] - vs_bbox[0]
+    vs_th = vs_bbox[3] - vs_bbox[1]
+    draw.text((vs_x - vs_tw // 2, vs_y - vs_th // 2 - 4), "VS", fill=TEXT_COLOR, font=font_vs)
 
     # Draw Card B
-    draw_card(PADDING * 2 + CARD_WIDTH, CARD_BG_B, dino_b, "right")
+    draw_card(PADDING * 2 + CARD_WIDTH, dino_b, "right")
+
+    # Convert to RGB for PNG save (Discord doesn't handle RGBA well)
+    final = Image.new("RGB", img.size, BG_COLOR)
+    final.paste(img, (0, 0), img)
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    final.save(buf, format="PNG")
     buf.seek(0)
     return buf
 
