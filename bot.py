@@ -127,6 +127,7 @@ def load_state():
     global checkin_active, checked_in_ids, checkin_message_id
     global admin_role_names, beta_role_names, archive_channel_id, session_ended
     global status_channel_id, status_start_msg, status_stop_msg
+    global battle_channel_id
     global session_type, nest_parent_ids, nest_baby_ids, nest_protector_ids
 
     try:
@@ -159,6 +160,7 @@ def load_state():
                 archive_channel_id = data.get('archive_channel_id', DEFAULT_ARCHIVE_CHANNEL_ID)
                 session_ended = data.get('session_ended', False)
                 status_channel_id = data.get('status_channel_id', None)
+                battle_channel_id = data.get('battle_channel_id', None)
                 status_start_msg = data.get('status_start_msg', '🟢 **{name}** is now LIVE! Join us!')
                 status_stop_msg = data.get('status_stop_msg', '🔴 **{name}** has ended. See you next time!')
                 session_type = data.get('session_type', 'hunt')
@@ -197,6 +199,7 @@ def load_state():
     archive_channel_id = DEFAULT_ARCHIVE_CHANNEL_ID
     session_ended = False
     status_channel_id = None
+    battle_channel_id = None
     status_start_msg = '🟢 **{name}** is now LIVE! Join us!'
     status_stop_msg = '🔴 **{name}** has ended. See you next time!'
     session_type = 'hunt'
@@ -229,6 +232,7 @@ def save_state():
         'archive_channel_id': archive_channel_id,
         'session_ended': session_ended,
         'status_channel_id': status_channel_id,
+        'battle_channel_id': battle_channel_id,
         'status_start_msg': status_start_msg,
         'status_stop_msg': status_stop_msg,
         'session_type': session_type,
@@ -2932,6 +2936,11 @@ async def dinobattle(ctx):
     import random
     import time
     
+    # Battle channel restriction
+    if battle_channel_id and ctx.channel.id != battle_channel_id:
+        await ctx.send(f"⚔️ Battles are restricted to <#{battle_channel_id}>!", delete_after=8)
+        return
+    
     all_dinos = load_dinos()
     if len(all_dinos) < 2:
         await ctx.send("Not enough dinosaurs in the roster to battle. Need at least 2.")
@@ -3607,6 +3616,7 @@ def update_settings(data):
     global MAX_ATTENDING, CHECKIN_GRACE_MINUTES, NOSHOW_THRESHOLD
     global admin_role_names, beta_role_names, archive_channel_id, session_days
     global status_channel_id, status_start_msg, status_stop_msg
+    global battle_channel_id
     global session_type, nest_parent_ids, nest_baby_ids, nest_protector_ids
     if "max_attending" in data:
         MAX_ATTENDING = int(data["max_attending"])
@@ -3625,6 +3635,9 @@ def update_settings(data):
     if "status_channel_id" in data:
         val = data["status_channel_id"]
         status_channel_id = int(val) if val else None
+    if "battle_channel_id" in data:
+        val = data["battle_channel_id"]
+        battle_channel_id = int(val) if val else None
     if "status_start_msg" in data:
         status_start_msg = data["status_start_msg"]
     if "status_stop_msg" in data:
@@ -3707,6 +3720,7 @@ async def on_ready():
         "archive_channel_id": lambda: archive_channel_id,
         "schedule_channel_id": lambda: SCHEDULE_CHANNEL_ID,
         "status_channel_id":   lambda: status_channel_id,
+        "battle_channel_id":   lambda: battle_channel_id,
         "status_start_msg":    lambda: status_start_msg,
         "status_stop_msg":     lambda: status_stop_msg,
         "session_type":        lambda: session_type,

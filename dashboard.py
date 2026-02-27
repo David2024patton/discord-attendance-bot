@@ -1317,18 +1317,32 @@ async def dino_profile_page(request):
             }});
             html += '</div>';
 
-            // Abilities used summary
-            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px">';
+            // Battle stats summary
+            const totalKOs = (result.total_kos || 0);
+            const anyFled = result.any_fled || false;
+            const bleedKills = result.bleed_kills || 0;
+
+            html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px">';
+            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:var(--text-bright)">' + (result.rounds || []).length + '</div><div style="font-size:11px;color:var(--text-dim)">Rounds</div></div>';
+            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:var(--red)">💀 ' + totalKOs + '</div><div style="font-size:11px;color:var(--text-dim)">KOs</div></div>';
+            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:' + (anyFled ? 'var(--green)' : 'var(--text-dim)') + '">' + (anyFled ? '🏃 Yes' : '—') + '</div><div style="font-size:11px;color:var(--text-dim)">Fled</div></div>';
+            html += '<div style="text-align:center;padding:10px;background:var(--bg3);border-radius:8px"><div style="font-size:18px;font-weight:800;color:' + (bleedKills > 0 ? 'var(--red)' : 'var(--text-dim)') + '">' + (bleedKills > 0 ? '🩸 ' + bleedKills : '—') + '</div><div style="font-size:11px;color:var(--text-dim)">Bleed Kills</div></div>';
+            html += '</div>';
+
+            // Abilities used (compact pills)
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">';
             [fa, fb].forEach(function(f) {{
                 html += '<div style="background:var(--bg3);border-radius:8px;padding:12px">';
-                html += '<div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--text-bright)">' + f.name + ' &mdash; Abilities Used</div>';
+                html += '<div style="font-weight:700;font-size:12px;margin-bottom:6px;color:var(--text-bright)">' + f.name + '</div>';
                 const abilities = f.abilities_used || {{}};
                 if (Object.keys(abilities).length === 0) {{
-                    html += '<div style="color:var(--text-dim);font-size:12px">No abilities used</div>';
+                    html += '<span style="font-size:11px;color:var(--text-dim)">No abilities used</span>';
                 }} else {{
+                    html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
                     Object.entries(abilities).forEach(function(entry) {{
-                        html += '<div style="font-size:12px;color:var(--text-dim)">' + entry[0] + ': <strong style="color:var(--text-bright)">' + entry[1] + 'x</strong></div>';
+                        html += '<span style="font-size:11px;padding:2px 8px;background:var(--bg);border-radius:12px;color:var(--text-dim)">' + entry[0] + ' <strong style="color:var(--text-bright)">' + entry[1] + 'x</strong></span>';
                     }});
+                    html += '</div>';
                 }}
                 html += '</div>';
             }});
@@ -1336,7 +1350,7 @@ async def dino_profile_page(request):
 
             // Battle Again button
             html += '<div style="text-align:center;margin-top:16px">';
-            html += '<button class="btn" onclick="battleAgain()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px">⚔️ Battle Again</button>';
+            html += '<button class="btn" onclick="battleAgain()" style="background:linear-gradient(135deg,#e74c3c,#c0392b);color:white;border:none;font-weight:700;padding:10px 24px;font-size:14px;border-radius:8px">⚔️ Battle Again</button>';
             html += '</div>';
 
             content.innerHTML = html;
@@ -1394,6 +1408,7 @@ async def settings_page(request):
     archive_ch = g.get("archive_channel_id", lambda: "")()
     schedule_ch = g.get("schedule_channel_id", lambda: "")()
     status_ch = g.get("status_channel_id", lambda: None)()
+    battle_ch = g.get("battle_channel_id", lambda: None)()
     start_msg = g.get("status_start_msg", lambda: "")()
     stop_msg = g.get("status_stop_msg", lambda: "")()
 
@@ -1576,6 +1591,24 @@ async def settings_page(request):
                 </div>
             </div>
         </div>
+        <div style="margin-top:16px">
+            <div class="card">
+                <div class="card-header">⚔️ Battle Channel</div>
+                <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
+                    Restrict <code>!dinobattle</code> to a specific channel. If set, battles can only be started there.
+                </p>
+                <div class="setting-row" style="flex-direction:column;align-items:flex-start;gap:8px">
+                    <div><div class="setting-label">Battle Channel</div><div class="setting-desc">Select guild, then channel for battles</div></div>
+                    <div style="display:flex;gap:8px;width:100%">
+                        <select id="battleGuild" class="setting-input" style="width:50%;text-align:left" onchange="filterChannels('battleGuild','battleCh')"><option>Loading...</option></select>
+                        <select id="battleCh" class="setting-input" style="width:50%;text-align:left"><option value="">Any Channel (no restriction)</option></select>
+                    </div>
+                </div>
+                <div style="margin-top:16px;text-align:right">
+                    <button class="btn btn-primary" onclick="saveBattleChannel()">Save Battle Channel</button>
+                </div>
+            </div>
+        </div>
         <div style="margin-top:24px">
             <h3 style="color:var(--text-bright);margin-bottom:12px">📖 Bot Commands Cheat Sheet</h3>
             <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:16px;">
@@ -1615,8 +1648,19 @@ async def settings_page(request):
                     <div class="card-header" style="color:#f1c40f">🧪 Test Commands</div>
                     <ul class="user-list" style="font-size:13px">
                         <li><strong>!testsession [minutes]</strong><br><span style="color:var(--text-dim)">Create a quick default test session (1 min).</span></li>
-                        <li><strong>!testsession &lt;type&gt; [minutes]</strong><br><span style="color:var(--text-dim)">Create a fast test of a specific type (e.g. `!testsession nesting 5`).</span></li>
+                        <li><strong>!testsession &lt;type&gt; [minutes]</strong><br><span style="color:var(--text-dim)">Create a fast test of a specific type.</span></li>
                     </ul>
+                    <div style="margin-top:8px;padding:10px;background:var(--bg);border-radius:8px;font-size:12px">
+                        <div style="color:var(--text-bright);font-weight:700;margin-bottom:6px">Available Session Types:</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:6px">
+                            <span style="padding:3px 10px;background:rgba(231,76,60,0.15);border-radius:12px;color:#e74c3c">🦴 hunt</span>
+                            <span style="padding:3px 10px;background:rgba(241,196,15,0.15);border-radius:12px;color:#f1c40f">🥚 nesting</span>
+                            <span style="padding:3px 10px;background:rgba(46,204,113,0.15);border-radius:12px;color:#2ecc71">🌱 growth</span>
+                            <span style="padding:3px 10px;background:rgba(233,30,99,0.15);border-radius:12px;color:#e91e63">⚔️ pvp</span>
+                            <span style="padding:3px 10px;background:rgba(52,152,219,0.15);border-radius:12px;color:#3498db">🏃 migration</span>
+                        </div>
+                        <div style="color:var(--text-dim);margin-top:6px">Example: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">!testsession nesting 5</code></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1625,11 +1669,13 @@ async def settings_page(request):
     let _allGuilds = [];
     const _currentArchive = '{archive_ch}';
     const _currentStatus = '{status_ch or ""}';
+    const _currentBattle = '{battle_ch or ""}';
 
     fetch('/api/channels').then(r => r.json()).then(d => {{
         _allGuilds = d.guilds || [];
         populateGuildDropdown('archiveGuild', 'archiveCh', _currentArchive);
         populateGuildDropdown('statusGuild', 'statusCh', _currentStatus);
+        populateGuildDropdown('battleGuild', 'battleCh', _currentBattle);
     }});
 
     // Role chip selectors
@@ -1834,6 +1880,11 @@ async def settings_page(request):
             betaNames.push(el.dataset.roleName);
         }});
         _post('/api/settings', {{ admin_role_names: adminNames, beta_role_names: betaNames }}, 'Role settings saved!');
+    }}
+    function saveBattleChannel() {{
+        _post('/api/settings', {{
+            battle_channel_id: document.getElementById('battleCh').value
+        }}, 'Battle channel saved!');
     }}
     function saveStatus() {{
         _post('/api/settings', {{
@@ -3260,6 +3311,10 @@ async def api_battle(request):
             "rounds": flat_rounds,
             "fighter_a": result["fighter_a"],
             "fighter_b": result["fighter_b"],
+            "any_fled": result.get("any_fled", False),
+            "bleed_kills": result.get("bleed_kills", 0),
+            "first_crit_side": result.get("first_crit_side"),
+            "total_kos": result.get("total_kos", 0),
         })
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
