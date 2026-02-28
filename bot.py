@@ -2567,9 +2567,18 @@ async def days(ctx):
 # ----------------------------
 # Dino Battle Minigame
 # ----------------------------
-DINOS_FILE = os.path.join(os.path.dirname(__file__), "dinos.json")
-DINO_LB_FILE = os.path.join(os.path.dirname(__file__), "dino_lb.json")
-DINO_STATS_FILE = os.path.join(os.path.dirname(__file__), "dino_battle_stats.json")
+DINOS_FILE = os.path.join(DATA_DIR, "dinos.json")
+DINO_LB_FILE = os.path.join(DATA_DIR, "dino_lb.json")
+DINO_STATS_FILE = os.path.join(DATA_DIR, "dino_battle_stats.json")
+
+# Auto-migrate old data from /app/ to /app/data/ if needed
+for _fname in ["dinos.json", "dino_lb.json", "dino_battle_stats.json"]:
+    _old = os.path.join(os.path.dirname(__file__), _fname)
+    _new = os.path.join(DATA_DIR, _fname)
+    if os.path.exists(_old) and not os.path.exists(_new):
+        import shutil
+        shutil.copy2(_old, _new)
+        print(f"📦 Migrated {_fname} to persistent volume")
 
 DINO_TEMPLATES = [
     # Officials
